@@ -2,8 +2,9 @@
 
 Sources read: FormSaathi_AI_Editable_Report.md (PRD A6, A10, A12–A14),
 FormSaathi_AI_Hackathon_Master_Development_Playbook.docx (canonical contract),
-FormSaathi_Sourav_Personal_Development_Playbook.docx. Separate Sayan/Akash
-playbooks were unavailable; their master workstreams define their boundaries.
+FormSaathi_Sourav_Personal_Development_Playbook.docx. Revised ownership in AGENTS.md
+supersedes the source playbooks' assignments: Sourav owns all backend modules,
+including AI/ML and integration; Akash exclusively owns the independent frontend/ workstream.
 PRD controls product fields; master controls shared interfaces.
 
 ## Forms
@@ -53,7 +54,7 @@ Unknown fields/envelope properties are rejected before mutation. Validation retu
 field-level invalid states with 200 so users can correct values. All fields have
 an explicit status/message, including optional empty fields. Lists follow schema order.
 
-Validation proposals are unverified, not manual approval. Until Sayan's evidence
+Validation proposals are unverified, not manual approval. Until Sourav's evidence
 bridge exists, syntactically valid proposals require manual acknowledgement via
 PATCH. Contradictory proposals create conflicts without replacing an existing
 value, including manual values. PATCH resolves that field's uncertainty/conflict.
@@ -68,7 +69,11 @@ of the complete normalized values map (including optional nulls), never an exter
 submission. Subsequent edits invalidate confirmation. Repeated confirm at the same
 reviewed revision returns the same local confirmation.
 
-## Reserved AI interfaces (Sayan adapter, Sourav route)
+## Reserved AI interfaces (Sourav owns adapters and routes)
+
+Provider requirements remain Sarvam Saaras v4 (saaras:v4) for speech-to-text and
+Sarvam 105B (sarvam-105b) for structured extraction. Credentials stay server-side
+and out of Git. These requirements do not imply implemented or tested AI functionality.
 
 POST /api/sessions/{sid}/speech: multipart audio (file) and locale (en-IN/hi-IN).
 Agreed response: {transcript,language_code,provider,request_id}.

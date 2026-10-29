@@ -86,7 +86,7 @@ def delete(sid: str, request: Request):
                      "properties": {"audio": {"type": "string", "format": "binary"},
                                     "locale": {"type": "string", "enum": ["en-IN", "hi-IN"]}}}}}}})
 def speech(sid: str, request: Request):
-    # Do not consume/upload arbitrary audio until Sayan's adapter and guards exist.
+    # Do not consume/upload arbitrary audio until Sourav's adapter and guards exist.
     with request.app.state.sessions.access(sid):
         raise APIError(503, "ASR_UNAVAILABLE", "Speech is not integrated. Type your details instead.")
 

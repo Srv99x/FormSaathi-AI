@@ -30,9 +30,14 @@ See [BUILD_AND_RUN](docs/BUILD_AND_RUN.md) for tests and a manual API example,
 
 ## Ownership and sources
 
-Sourav: backend routes/schemas/validation/sessions/integration/release.
-Sayan: backend/app/ai/, speech/extraction and evaluation. Akash: frontend/ and mic/UI.
-Master and Sourav playbooks establish ownership and architecture. PRD
+Sourav owns all backend development and integration, including backend/app/api/,
+models/, schemas/, services/ and ai/, speech/extraction, AI/ML evaluation, shared
+contracts, tests and release. Akash exclusively owns frontend/ and microphone/UI
+work; his workstream remains independent. backend/app/ai/ remains a required module.
+AI requirements remain Sarvam Saaras v4 (saaras:v4) speech-to-text and Sarvam 105B
+(sarvam-105b) structured extraction; neither is integrated or verified yet.
+Revised ownership in AGENTS.md supersedes the original playbook assignments.
+Master and Sourav playbooks remain architecture references. PRD
 FormSaathi_AI_Editable_Report.md A6/A13 establishes exact product fields/constraints.
 See AGENTS.md before editing. No prior application code was imported.
 
@@ -51,6 +56,6 @@ The future vendor integration needs consent and vendor-retention review; no vend
 retention promises are made here. The local API has no authentication; bind loopback.
 
 No remote, commit, push or invented checkpoint evidence is created by this bootstrap.
-Dependencies keep their upstream licences; model/API terms must be checked by Sayan
+Dependencies keep their upstream licences; model/API terms must be checked by Sourav
 when integrating providers. Event timing conflicts remain an organiser clarification,
 not an asserted verified schedule.
