@@ -9,11 +9,11 @@ export interface VoiceOrbProps {
 
 export const VoiceOrb: React.FC<VoiceOrbProps> = ({
   state,
-  size = 64,
+  size = 80,
   volumeLevel = 0,
 }) => {
   // Dynamic scale influenced by audio energy during listening/speaking
-  const dynamicScale = Math.min(1.35, 1 + volumeLevel / 120);
+  const dynamicScale = Math.min(1.28, 1 + volumeLevel / 130);
 
   return (
     <div
@@ -28,7 +28,7 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
       {/* Outer ambient glow ring */}
       <div className="fs-orb-glow" />
 
-      {/* State-specific ripple rings for circular sound waves */}
+      {/* State-specific ripple rings for sound waves */}
       {state === 'listening' && (
         <>
           <div className="fs-orb-ring fs-ring-green-1" />
@@ -46,9 +46,9 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
 
       {state === 'speaking' && (
         <>
-          <div className="fs-orb-ring fs-ring-blue-1" />
-          <div className="fs-orb-ring fs-ring-blue-2" />
-          <div className="fs-orb-ring fs-ring-blue-3" />
+          <div className="fs-orb-ring fs-ring-gold-1" />
+          <div className="fs-orb-ring fs-ring-gold-2" />
+          <div className="fs-orb-ring fs-ring-gold-3" />
         </>
       )}
 
@@ -63,7 +63,7 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
-          {/* Gradients for each state */}
+          {/* Gradients: Luxurious Gold, Emerald, Violet, Titanium */}
           <radialGradient id="grad-idle" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="#94a3b8" />
             <stop offset="100%" stopColor="#475569" />
@@ -76,15 +76,17 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
           </radialGradient>
 
           <radialGradient id="grad-thinking" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#c084fc" />
-            <stop offset="60%" stopColor="#9333ea" />
-            <stop offset="100%" stopColor="#6b21a8" />
+            <stop offset="0%" stopColor="#e9d5ff" />
+            <stop offset="50%" stopColor="#c084fc" />
+            <stop offset="100%" stopColor="#7e22ce" />
           </radialGradient>
 
+          {/* Luxurious Champagne Gold Speaking Gradient (Replaces electric blue) */}
           <radialGradient id="grad-speaking" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#60a5fa" />
-            <stop offset="60%" stopColor="#2563eb" />
-            <stop offset="100%" stopColor="#1d4ed8" />
+            <stop offset="0%" stopColor="#fef9c3" />
+            <stop offset="30%" stopColor="#fde047" />
+            <stop offset="70%" stopColor="#d4af37" />
+            <stop offset="100%" stopColor="#92400e" />
           </radialGradient>
         </defs>
 

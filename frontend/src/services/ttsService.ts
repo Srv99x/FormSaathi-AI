@@ -7,6 +7,7 @@
 class TTSService {
   private currentAudio: HTMLAudioElement | null = null;
   private isSpeaking = false;
+  private playbackGeneration = 0;
   private onEndCallbacks: Set<() => void> = new Set();
   private onStartCallbacks: Set<() => void> = new Set();
 
@@ -25,13 +26,18 @@ class TTSService {
   }
 
   /**
-   * Stop all active audio playback immediately (< 50ms)
+   * Stop all active audio playback immediately (< 50ms).
+   * Guarantees zero residual or concurrent audio playback.
    */
   public stop(): void {
+    this.playbackGeneration++;
+
     if (this.currentAudio) {
       try {
         this.currentAudio.pause();
         this.currentAudio.currentTime = 0;
+        this.currentAudio.onended = null;
+        this.currentAudio.onerror = null;
         this.currentAudio.src = '';
       } catch {
         // ignore
@@ -64,9 +70,9 @@ class TTSService {
     _locale: 'en-IN' | 'hi-IN' = 'en-IN'
   ): Promise<void> {
     this.stop();
+    const thisGen = ++this.playbackGeneration;
 
     if (!base64Audio || !base64Audio.trim()) {
-      // No browser speech fallback; complete cleanly
       this.isSpeaking = false;
       this.notifyEnd();
       return;
@@ -86,32 +92,40 @@ class TTSService {
 
       await new Promise<void>((resolve) => {
         audio.onended = () => {
-          this.isSpeaking = false;
-          this.currentAudio = null;
-          this.notifyEnd();
+          if (this.playbackGeneration === thisGen) {
+            this.isSpeaking = false;
+            this.currentAudio = null;
+            this.notifyEnd();
+          }
           resolve();
         };
 
         audio.onerror = (e) => {
           console.warn('Sarvam HTMLAudio playback error', e);
-          this.isSpeaking = false;
-          this.currentAudio = null;
-          this.notifyEnd();
+          if (this.playbackGeneration === thisGen) {
+            this.isSpeaking = false;
+            this.currentAudio = null;
+            this.notifyEnd();
+          }
           resolve();
         };
 
         audio.play().catch((err) => {
           console.warn('Audio play was interrupted or blocked', err);
-          this.isSpeaking = false;
-          this.currentAudio = null;
-          this.notifyEnd();
+          if (this.playbackGeneration === thisGen) {
+            this.isSpeaking = false;
+            this.currentAudio = null;
+            this.notifyEnd();
+          }
           resolve();
         });
       });
     } catch (err) {
       console.warn('Audio initialization failed', err);
-      this.isSpeaking = false;
-      this.notifyEnd();
+      if (this.playbackGeneration === thisGen) {
+        this.isSpeaking = false;
+        this.notifyEnd();
+      }
     }
   }
 

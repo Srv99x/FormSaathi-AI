@@ -1,39 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { PhoneOff, Hand, Check, Mic, ChevronDown, Sparkles, X } from 'lucide-react';
+import { PhoneOff, Pause, Play, ChevronDown, Sparkles, X, Mic } from 'lucide-react';
 import { OrbState } from '../../types/voice';
 import { AudioVisualizer } from './AudioVisualizer';
 import { VoiceOrb } from './VoiceOrb';
 
 export interface VoiceAgentBarProps {
   isCallActive: boolean;
+  isPaused?: boolean;
   orbState: OrbState;
-  assistantMessage: string;
-  userTranscript?: string;
   callDurationSeconds: number;
   volumeLevel: number;
   locale?: 'en-IN' | 'hi-IN';
   lastAutoFilledCount?: number;
   onStartCall: () => void;
   onEndCall: () => void;
-  onInterrupt: () => void;
-  onDoneSpeaking: () => void;
+  onTogglePause?: () => void;
+  onInterrupt?: () => void;
 }
 
 export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
   isCallActive,
+  isPaused = false,
   orbState,
-  assistantMessage,
-  userTranscript,
   callDurationSeconds,
   volumeLevel,
   locale = 'en-IN',
   lastAutoFilledCount = 0,
   onStartCall,
   onEndCall,
+  onTogglePause,
   onInterrupt,
-  onDoneSpeaking,
 }) => {
-  // When a call becomes active, ensure it is expanded by default
+  // When call starts, expand automatically
   const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
@@ -52,30 +50,31 @@ export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
 
   const isHindi = locale === 'hi-IN';
 
+  // Luxurious color palette: Champagne Gold for Speaking, Emerald for Listening, Amethyst for Thinking
   const orbColor =
     orbState === 'listening'
       ? '#10b981'
       : orbState === 'thinking'
-      ? '#9333ea'
+      ? '#c084fc'
       : orbState === 'speaking'
-      ? '#2563eb'
-      : '#64748b';
+      ? '#d4af37'
+      : '#94a3b8';
 
-  // 1. Idle state OR Minimized state -> Small icon floating on the bottom right
+  // 1. Idle state OR Minimized state -> Sleek floating FAB on bottom-right
   if (!isCallActive || !isExpanded) {
     return (
       <aside className="fs-voice-fab-wrap" aria-label="Voice Assistant Floating Action Button">
-        {/* Subtle hover tooltip/pill on the left of the button */}
+        {/* Subtle hover tooltip on the left of the button */}
         <div className="fs-voice-fab-tooltip">
           <span className="fs-voice-fab-tooltip-title">
             {isCallActive
-              ? (isHindi ? 'कॉल जारी है' : 'Call Active')
+              ? (isHindi ? 'आवाज़ सहायक सक्रिय है' : 'Voice Assistant Active')
               : (isHindi ? 'बोलकर फॉर्म भरें' : 'Fill Form with Voice')}
           </span>
           <span className="fs-voice-fab-tooltip-sub">
             {isCallActive
-              ? (isHindi ? 'टैप करके देखें' : 'Click to open assistant')
-              : (isHindi ? 'आवाज़ सहायक शुरू करें' : 'Click to start voice agent')}
+              ? (isHindi ? 'टैप करके देखें' : 'Click to expand')
+              : (isHindi ? 'आवाज़ सहायक शुरू करें' : 'Click to start')}
           </span>
         </div>
 
@@ -97,13 +96,13 @@ export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
               : 'Start Hands-Free Voice Assistant'
           }
         >
-          {/* Animated circular wave ring around the button */}
+          {/* Animated circular wave ring */}
           <span className="fs-fab-ripple fs-fab-ripple-1" />
           <span className="fs-fab-ripple fs-fab-ripple-2" />
 
           {isCallActive ? (
             <div className="fs-fab-mini-orb-container">
-              <VoiceOrb state={orbState} size={38} volumeLevel={volumeLevel} />
+              <VoiceOrb state={orbState} size={42} volumeLevel={volumeLevel} />
               <span className="fs-fab-live-dot" style={{ backgroundColor: orbColor }} />
             </div>
           ) : (
@@ -117,148 +116,125 @@ export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
     );
   }
 
-  // 2. Expanded Voice Agent Dialog Card (Floating Bottom-Right)
+  // 2. Expanded Voice Agent Luxury Card (Floating Bottom-Right)
   return (
     <aside
-      className="fs-voice-widget-card"
+      className="fs-voice-widget-card fs-luxury-card"
       role="dialog"
       aria-label="Active Voice Assistant Call"
     >
-      {/* Top Header */}
+      {/* Top Header: Title, Timer, Minimize & End */}
       <div className="fs-widget-header">
         <div className="fs-widget-header-left">
           <span className="fs-widget-live-dot" style={{ backgroundColor: orbColor }} />
           <div className="fs-widget-titles">
-            <span className="fs-widget-title">
-              {isHindi ? 'आवाज़ सहायक' : 'Voice Assistant'}
-            </span>
+            <span className="fs-widget-title">FormSaathi AI</span>
             <span className="fs-widget-timer">{formatTimer(callDurationSeconds)}</span>
           </div>
         </div>
 
         <div className="fs-widget-header-actions">
-          {/* Minimize button to collapse into small right-side icon */}
+          {/* Minimize button (keeps audio/call active in background) */}
           <button
             type="button"
-            className="fs-widget-icon-btn"
+            className="fs-widget-icon-btn fs-btn-minimize"
             onClick={() => setIsExpanded(false)}
-            title={isHindi ? 'छोटा करें' : 'Minimize to floating icon'}
+            title={isHindi ? 'छोटा करें' : 'Minimize (keeps call active)'}
             aria-label="Minimize Voice Assistant"
           >
             <ChevronDown size={18} />
           </button>
 
-          {/* End Call button */}
+          {/* Close button (stops and completely resets call) */}
           <button
             type="button"
             className="fs-widget-icon-btn fs-widget-btn-close"
             onClick={onEndCall}
-            title={isHindi ? 'कॉल समाप्त' : 'End Call'}
-            aria-label="End call"
+            title={isHindi ? 'बंद करें और रीसेट करें' : 'Close and stop assistant'}
+            aria-label="Close and stop assistant"
           >
             <X size={18} />
           </button>
         </div>
       </div>
 
-      {/* Main Center: Circular Wave Voice Agent */}
+      {/* Main Center Stage: Large Elegant Voice Orb */}
       <div className="fs-widget-body">
         <div className="fs-widget-orb-stage">
-          <VoiceOrb state={orbState} size={88} volumeLevel={volumeLevel} />
+          <VoiceOrb state={isPaused ? 'idle' : orbState} size={124} volumeLevel={volumeLevel} />
         </div>
 
-        {/* Audio Visualizer beneath the orb */}
+        {/* Dynamic Frequency Waveform beneath orb */}
         <div className="fs-widget-viz-wrap">
           <AudioVisualizer
-            volume={volumeLevel}
-            isActive={orbState === 'listening' || orbState === 'speaking'}
+            volume={isPaused ? 0 : volumeLevel}
+            isActive={!isPaused && (orbState === 'listening' || orbState === 'speaking')}
             color={orbColor}
-            barsCount={10}
+            barsCount={12}
           />
         </div>
 
-        {/* State Pill */}
+        {/* State Status Pill */}
         <div className="fs-widget-status-badge" style={{ color: orbColor }}>
           <span className="fs-state-dot" style={{ backgroundColor: orbColor }} />
           <span className="fs-status-label">
-            {orbState === 'listening' &&
+            {isPaused && (isHindi ? 'कॉल रुकी हुई है' : 'Assistant Paused')}
+            {!isPaused && orbState === 'listening' &&
               (volumeLevel > 14
-                ? (isHindi ? 'आपकी बात सुन रहा हूँ...' : 'Hearing you speak...')
+                ? (isHindi ? 'सुन रहा हूँ...' : 'Listening...')
                 : (isHindi ? 'सुन रहा हूँ... बोलिए' : 'Listening... speak now'))}
-            {orbState === 'thinking' && (isHindi ? 'समझ रहा हूँ...' : 'Processing your response...')}
-            {orbState === 'speaking' && (isHindi ? 'बोल रहा हूँ...' : 'Speaking...')}
-            {orbState === 'idle' && (isHindi ? 'तैयार' : 'Ready')}
+            {!isPaused && orbState === 'thinking' && (isHindi ? 'समझ रहा हूँ...' : 'Processing...')}
+            {!isPaused && orbState === 'speaking' && (isHindi ? 'सहायक बोल रहा है...' : 'Assistant Speaking...')}
+            {!isPaused && orbState === 'idle' && (isHindi ? 'तैयार' : 'Ready')}
           </span>
 
           {lastAutoFilledCount > 0 && (
             <span className="fs-autofill-badge">
-              ✓ {lastAutoFilledCount} {isHindi ? 'फ़ील्ड भरे गए' : 'fields populated'}
+              ✓ {lastAutoFilledCount} {isHindi ? 'फ़ील्ड भरे' : 'auto-filled'}
             </span>
-          )}
-        </div>
-
-        {/* Dialogue / Speech Bubble */}
-        <div className="fs-widget-dialogue-box">
-          <div className="fs-widget-assistant-msg" aria-live="polite">
-            <span className="fs-dialogue-sender">
-              {isHindi ? 'सहायक: ' : 'Assistant: '}
-            </span>
-            {assistantMessage ||
-              (isHindi
-                ? 'नमस्ते! कृपया अपनी जानकारी बताएं...'
-                : "Hello! I'm listening. Please speak your details...")}
-          </div>
-
-          {userTranscript && orbState !== 'speaking' && (
-            <div className="fs-widget-user-msg">
-              <span className="fs-user-label">{isHindi ? 'आपने कहा: ' : 'You: '}</span>
-              <span className="fs-user-text">"{userTranscript}"</span>
-            </div>
           )}
         </div>
       </div>
 
-      {/* Footer Controls */}
-      <div className="fs-widget-footer">
-        {/* Barge-in interrupt button when assistant is speaking */}
-        {orbState === 'speaking' && (
+      {/* Footer Controls: Sleek Circular Action Buttons */}
+      <div className="fs-widget-footer fs-luxury-footer">
+        {/* Tap to Interrupt (when speaking) */}
+        {!isPaused && orbState === 'speaking' && onInterrupt && (
           <button
             type="button"
-            className="fs-control-btn fs-btn-interrupt fs-widget-action-btn"
+            className="fs-luxury-pill-btn fs-btn-tap-interrupt"
             onClick={onInterrupt}
-            title="Interrupt Assistant (Barge-in)"
-            aria-label="Tap to interrupt assistant"
+            title={isHindi ? 'टैप करके रोकें' : 'Tap to interrupt and speak'}
           >
-            <Hand size={16} />
-            <span>{isHindi ? 'रोकें व बोलें' : 'Tap to Interrupt'}</span>
+            <span>{isHindi ? 'रोकें व बोलें' : 'Tap to Speak'}</span>
           </button>
         )}
 
-        {/* Automated VAD active: pauses automatically submit, or user can tap */}
-        {orbState === 'listening' && (
+        <div className="fs-circular-controls-row">
+          {/* Circular Pause / Resume Button */}
+          {onTogglePause && (
+            <button
+              type="button"
+              className={`fs-circle-btn fs-circle-pause ${isPaused ? 'fs-circle-paused' : ''}`}
+              onClick={onTogglePause}
+              title={isPaused ? (isHindi ? 'शुरू करें' : 'Resume Assistant') : (isHindi ? 'रोकें' : 'Pause Assistant')}
+              aria-label={isPaused ? 'Resume Assistant' : 'Pause Assistant'}
+            >
+              {isPaused ? <Play size={20} /> : <Pause size={20} />}
+            </button>
+          )}
+
+          {/* Circular End Call Button */}
           <button
             type="button"
-            className="fs-control-btn fs-btn-done fs-widget-action-btn"
-            onClick={onDoneSpeaking}
-            title="Auto-detects when you finish speaking, or tap to send immediately"
-            aria-label="Done speaking"
+            className="fs-circle-btn fs-circle-end"
+            onClick={onEndCall}
+            title={isHindi ? 'कॉल समाप्त करें' : 'End Call & Reset'}
+            aria-label="End Call and Reset"
           >
-            <Check size={16} />
-            <span>{isHindi ? 'रुकें या टैप करें' : 'Done (or just pause)'}</span>
+            <PhoneOff size={20} />
           </button>
-        )}
-
-        {/* End Call Button */}
-        <button
-          type="button"
-          className="fs-control-btn fs-btn-end fs-widget-end-btn"
-          onClick={onEndCall}
-          title="End Voice Call"
-          aria-label="End call"
-        >
-          <PhoneOff size={16} />
-          <span>{isHindi ? 'कॉल समाप्त' : 'End Call'}</span>
-        </button>
+        </div>
       </div>
     </aside>
   );

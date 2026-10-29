@@ -91,16 +91,15 @@ export const FormFillerPage: React.FC = () => {
   // Real-time Voice Call hook
   const {
     isCallActive,
+    isPaused,
     orbState,
-    assistantMessage,
-    userTranscript,
     callDurationSeconds,
     volumeLevel,
     pendingSpellingVerification,
     startCall,
     endCall,
+    togglePause,
     interruptAssistant,
-    submitCurrentSpeechTurn,
     resolveSpelling,
     skipOptionalAndFinalize,
   } = useVoiceCall({
@@ -265,16 +264,15 @@ export const FormFillerPage: React.FC = () => {
       {!confirmation && (
         <VoiceAgentBar
           isCallActive={isCallActive}
+          isPaused={isPaused}
           orbState={orbState}
-          assistantMessage={assistantMessage}
-          userTranscript={userTranscript}
           callDurationSeconds={callDurationSeconds}
           volumeLevel={volumeLevel}
           locale={locale}
           onStartCall={startCall}
           onEndCall={endCall}
+          onTogglePause={togglePause}
           onInterrupt={interruptAssistant}
-          onDoneSpeaking={submitCurrentSpeechTurn}
         />
       )}
 

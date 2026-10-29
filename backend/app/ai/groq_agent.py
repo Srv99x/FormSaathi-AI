@@ -10,6 +10,41 @@ from app.services.ai_adapter import apply_field_mapping
 from app.services.errors import APIError
 
 
+def clean_name_spelling_concatenation(name: str) -> str:
+    """
+    Prevents concatenation of a spoken name and its spelled-out letters.
+    E.g.: 'Rahul R-A-H-U-L' -> 'Rahul', 'Sayan S A Y A N' -> 'Sayan',
+    'Pooja Das P O O J A' -> 'Pooja Das', 'R-A-H-U-L Rahul' -> 'Rahul'.
+    """
+    if not name or not isinstance(name, str):
+        return name
+    clean = name.strip()
+
+    # Pattern 1: base name followed by spelled letters (e.g. 'Rahul R-A-H-U-L' or 'Rahul R A H U L')
+    m1 = re.match(r"^([A-Za-z]+(?:\s+[A-Za-z]+)*?)\s+((?:[A-Za-z][\s\-])+[A-Za-z])$", clean)
+    if m1:
+        base_name = m1.group(1).strip()
+        spelled_part = m1.group(2).strip()
+        clean_spelled = re.sub(r"[\s\-]", "", spelled_part).lower()
+        base_clean = re.sub(r"\s+", "", base_name).lower()
+        words = [w.lower() for w in base_name.split()]
+        if clean_spelled == base_clean or clean_spelled in words or base_clean.endswith(clean_spelled) or base_clean.startswith(clean_spelled):
+            return base_name
+
+    # Pattern 2: spelled letters followed by base name (e.g. 'S-A-Y-A-N Sayan')
+    m2 = re.match(r"^((?:[A-Za-z][\s\-])+[A-Za-z])\s+([A-Za-z]+(?:\s+[A-Za-z]+)*?)$", clean)
+    if m2:
+        spelled_part = m2.group(1).strip()
+        base_name = m2.group(2).strip()
+        clean_spelled = re.sub(r"[\s\-]", "", spelled_part).lower()
+        base_clean = re.sub(r"\s+", "", base_name).lower()
+        words = [w.lower() for w in base_name.split()]
+        if clean_spelled == base_clean or clean_spelled in words or base_clean.endswith(clean_spelled) or base_clean.startswith(clean_spelled):
+            return base_name
+
+    return clean
+
+
 class GroqAgent:
     """Agent using Groq (Llama 3.3) for entity extraction and conversational voice guidance."""
 

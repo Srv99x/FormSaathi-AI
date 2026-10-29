@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { tts } from '../services/ttsService';
+import { getCachedIntroAudio } from '../services/cachedAudio';
 import { FormSchema } from '../types/form';
 import { OrbState, PhoneticVerification } from '../types/voice';
 import { useMediaRecorder } from './useMediaRecorder';
@@ -25,6 +26,7 @@ export function useVoiceCall({
   onFieldHighlighted,
 }: UseVoiceCallOptions) {
   const [isCallActive, setIsCallActive] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [orbState, setOrbState] = useState<OrbState>('idle');
   const [assistantMessage, setAssistantMessage] = useState<string>('');
   const [userTranscript, setUserTranscript] = useState<string>('');
@@ -38,7 +40,14 @@ export function useVoiceCall({
   const isBargeInActiveRef = useRef(false);
   const isProcessingTurnRef = useRef(false);
 
-  // We keep a ref to sessionId, values, and formSchema so callbacks don't capture stale closures
+  // Active call session generation token. Incrementing this immediately drops late network responses!
+  const callSessionTokenRef = useRef(0);
+  const isCallActiveRef = useRef(false);
+  isCallActiveRef.current = isCallActive;
+
+  const isPausedRef = useRef(false);
+  isPausedRef.current = isPaused;
+
   const sessionIdRef = useRef<string | null>(sessionId);
   sessionIdRef.current = sessionId;
 
@@ -54,7 +63,6 @@ export function useVoiceCall({
   // Barge-in monitor during TTS speech playback
   const handleAudioData = useCallback(
     (volume: number) => {
-      // If assistant is speaking and user starts talking, trigger instant barge-in (<100ms)
       if (enableBargeIn && orbState === 'speaking' && volume > 28 && !isBargeInActiveRef.current) {
         isBargeInActiveRef.current = true;
         tts.stop();
@@ -67,12 +75,11 @@ export function useVoiceCall({
     [enableBargeIn, orbState]
   );
 
-  // Reference to current submit turn function to avoid closure staleness
   const submitTurnRef = useRef<() => Promise<void>>(async () => {});
 
-  // When silence is detected after user speaking, automatically submit the speech turn!
+  // Silence detected callback (automated VAD)
   const handleSilenceDetected = useCallback(() => {
-    if (!isProcessingTurnRef.current) {
+    if (!isProcessingTurnRef.current && isCallActiveRef.current && !isPausedRef.current) {
       submitTurnRef.current();
     }
   }, []);
@@ -85,15 +92,16 @@ export function useVoiceCall({
   } = useMediaRecorder({
     onAudioData: handleAudioData,
     onSilenceDetected: handleSilenceDetected,
-    silenceThresholdMs: 1350, // Auto-submit when user pauses for 1.35s
-    energyThreshold: 14,      // Responsive to natural speaking volume
+    silenceThresholdMs: 1350,
+    energyThreshold: 14,
   });
 
-  // Execute one conversational turn by sending recorded audio blob or text to backend
+  // Execute conversational turn
   const executeTurn = useCallback(
     async (audioBlob?: Blob | null, textTranscript?: string) => {
       const currentSid = sessionIdRef.current;
-      if (!currentSid) return;
+      const currentToken = callSessionTokenRef.current;
+      if (!currentSid || !isCallActiveRef.current) return;
 
       isProcessingTurnRef.current = true;
       setOrbState('thinking');
@@ -106,11 +114,16 @@ export function useVoiceCall({
           currentValues: currentValuesRef.current,
         });
 
+        // If the call was closed while waiting for backend, DROP response immediately!
+        if (callSessionTokenRef.current !== currentToken || !isCallActiveRef.current) {
+          return;
+        }
+
         if (turnResponse.user_transcript) {
           setUserTranscript(turnResponse.user_transcript);
         }
 
-        // 1. Live Field Auto-population
+        // Live Field Auto-population
         const recognizedCandidates = turnResponse.candidates || [];
         const recognizedValues: Record<string, string | number | null> = {};
         const changedFields: string[] = [];
@@ -144,7 +157,7 @@ export function useVoiceCall({
           setLastAutoFilledFields(changedFields);
         }
 
-        // 2. Phonetic spelling verification modal trigger
+        // Phonetic verification trigger
         if (turnResponse.name_candidate && turnResponse.name_spelling) {
           setPendingSpellingVerification({
             name: turnResponse.name_candidate,
@@ -153,35 +166,43 @@ export function useVoiceCall({
           });
         }
 
-        // 3. Dynamic dropdown handling or assistant spoken reply
         const replyText = turnResponse.assistant_message || '';
         setAssistantMessage(replyText);
 
-        // 4. Speak response via TTS
-        setOrbState('speaking');
-        await tts.speak(replyText, turnResponse.assistant_audio_base64, localeRef.current);
+        // Speak response via TTS only if call is still active
+        if (callSessionTokenRef.current === currentToken && isCallActiveRef.current && !isPausedRef.current) {
+          setOrbState('speaking');
+          await tts.speak(replyText, turnResponse.assistant_audio_base64, localeRef.current);
+        }
 
-        // 5. Seamless loop: once TTS concludes, resume listening if call is still active
-        if (isCallActive) {
+        // Resume listening if call is active and not paused
+        if (callSessionTokenRef.current === currentToken && isCallActiveRef.current && !isPausedRef.current) {
           setOrbState('listening');
           await startRecording();
         }
       } catch (err: any) {
         console.warn('Voice turn error, falling back gracefully', err);
+        if (callSessionTokenRef.current !== currentToken || !isCallActiveRef.current) return;
+
         const fallbackMsg =
           localeRef.current === 'hi-IN'
             ? 'मैंने आपकी बात सुन ली है। कृपया अगले फ़ील्ड की जानकारी बताएं।'
             : "I heard you. Please continue with your details or tap any field to edit.";
         setAssistantMessage(fallbackMsg);
         setOrbState('speaking');
+
         let fallbackAudio: string | null = null;
         try {
           fallbackAudio = await api.synthesizeTTS(fallbackMsg, localeRef.current);
         } catch {
           // ignore
         }
-        await tts.speak(fallbackMsg, fallbackAudio, localeRef.current);
-        if (isCallActive) {
+
+        if (callSessionTokenRef.current === currentToken && isCallActiveRef.current && !isPausedRef.current) {
+          await tts.speak(fallbackMsg, fallbackAudio, localeRef.current);
+        }
+
+        if (callSessionTokenRef.current === currentToken && isCallActiveRef.current && !isPausedRef.current) {
           setOrbState('listening');
           await startRecording();
         }
@@ -189,60 +210,61 @@ export function useVoiceCall({
         isProcessingTurnRef.current = false;
       }
     },
-    [isCallActive, onFieldHighlighted, onValuesExtracted, startRecording]
+    [onFieldHighlighted, onValuesExtracted, startRecording]
   );
 
-  // Submit current speech turn manually or via automated VAD
+  // Submit speech turn
   const submitCurrentSpeechTurn = useCallback(async () => {
-    if (isProcessingTurnRef.current) return;
+    if (isProcessingTurnRef.current || !isCallActiveRef.current || isPausedRef.current) return;
     const blob = await stopRecording();
-    // Verify audio chunk contains spoken content
     if (blob && blob.size > 1500) {
       await executeTurn(blob);
     } else {
-      if (isCallActive) {
+      if (isCallActiveRef.current && !isPausedRef.current) {
         setOrbState('listening');
         await startRecording();
       }
     }
-  }, [executeTurn, isCallActive, startRecording, stopRecording]);
+  }, [executeTurn, startRecording, stopRecording]);
 
   submitTurnRef.current = submitCurrentSpeechTurn;
 
-  // Barge-in interruption trigger (user clicks [✋ Tap to Interrupt])
+  // Interrupt assistant
   const interruptAssistant = useCallback(async () => {
     tts.stop();
     setOrbState('listening');
-    if (!isRecording) {
+    if (!isRecording && isCallActiveRef.current && !isPausedRef.current) {
       await startRecording();
     }
   }, [isRecording, startRecording]);
 
-  // Start voice call
+  // Start voice call with instant cached intro + parallel background status inspection
   const startCall = useCallback(async () => {
+    const currentToken = ++callSessionTokenRef.current;
     setIsCallActive(true);
+    setIsPaused(false);
     callStartTimeRef.current = Date.now();
     setCallDurationSeconds(0);
 
     // Call duration timer
+    if (callTimerRef.current) clearInterval(callTimerRef.current);
     callTimerRef.current = window.setInterval(() => {
       setCallDurationSeconds(Math.floor((Date.now() - callStartTimeRef.current) / 1000));
     }, 1000);
 
-    // Context-aware background form inspection on click
     const isHindi = localeRef.current === 'hi-IN';
     const formTitle = formSchemaRef.current?.title || (isHindi ? 'फॉर्म' : 'Form');
     const fields = formSchemaRef.current?.fields || [];
     const curVals = currentValuesRef.current || {};
 
-    // Check which fields are already filled (manually written or stored)
+    // Check filled fields
     const filledFields = fields.filter((f) => {
       const v = curVals[f.id];
       return v !== null && v !== undefined && String(v).trim() !== '';
     });
     const filledFieldNames = filledFields.map((f) => f.label || f.id);
 
-    // Find the next missing field in logical order
+    // Next missing field
     const unfilledRequired = fields.filter(
       (f) => f.required && (curVals[f.id] === null || curVals[f.id] === undefined || String(curVals[f.id]).trim() === '')
     );
@@ -252,39 +274,58 @@ export function useVoiceCall({
         : fields.find((f) => curVals[f.id] === null || curVals[f.id] === undefined || String(curVals[f.id]).trim() === '');
     const nextFieldLabel = nextField ? (nextField.label || nextField.id) : (isHindi ? 'विवरण' : 'details');
 
-    let initialGreeting = '';
+    // Prepare status speech text
+    let statusText = '';
     if (filledFields.length > 0) {
-      initialGreeting = isHindi
-        ? `नमस्ते! मैं आपका फॉर्म साथी हूँ। मैं देख सकता हूँ कि आप ${formTitle} भर रहे हैं। आपने अपना ${filledFieldNames.join(', ')} पहले ही भर लिया है। तो आइए बाकी का फॉर्म भरते हैं! फॉर्म में अब आपका ${nextFieldLabel} पूछा गया है, तो कृपया वह बताइए।`
-        : `Hello! I am FormSaathi, and I can see you are filling the ${formTitle}. You have already filled your ${filledFieldNames.join(', ')}. So let's continue filling it! The form asks for your ${nextFieldLabel} next, so please share it whenever you are ready.`;
+      statusText = isHindi
+        ? `मैं देख सकता हूँ कि आप ${formTitle} भर रहे हैं। आपने अपना ${filledFieldNames.join(', ')} पहले ही भर लिया है। तो आइए बाकी का फॉर्म भरते हैं! फॉर्म में अब आपका ${nextFieldLabel} पूछा गया है, तो कृपया बताइए।`
+        : `I see you are filling the ${formTitle}, and you have already filled your ${filledFieldNames.join(', ')}. Let's continue! The form asks for your ${nextFieldLabel} next, please share it.`;
     } else {
-      initialGreeting = isHindi
-        ? `नमस्ते! मैं आपका फॉर्म साथी हूँ, और मैं देख सकता हूँ कि आप ${formTitle} भर रहे हैं। आपने अभी तक कुछ नहीं भरा है, तो आइए इसे भरना शुरू करते हैं! फॉर्म में सबसे पहले आपका ${nextFieldLabel} पूछा गया है, तो कृपया बताइए।`
-        : `Hello! I am FormSaathi, and I can see you are filling the ${formTitle}. You haven't filled anything yet, so let's start filling it! The form asks for your ${nextFieldLabel} at first, so please share it whenever you are ready.`;
+      statusText = isHindi
+        ? `मैं देख सकता हूँ कि आप ${formTitle} भर रहे हैं। आपने अभी तक कुछ नहीं भरा है, तो आइए इसे भरना शुरू करते हैं! फॉर्म में सबसे पहले आपका ${nextFieldLabel} पूछा गया है, तो कृपया बताइए।`
+        : `I see you are filling the ${formTitle}. You haven't filled anything yet, so let's start filling it! The form asks for your ${nextFieldLabel} at first, please share it.`;
     }
 
-    setAssistantMessage(initialGreeting);
+    // 1. Instantly play pre-cached introductory line (0ms latency, zero waiting!)
+    const intro = getCachedIntroAudio(localeRef.current);
+    setAssistantMessage(intro.text);
     setOrbState('speaking');
 
-    // Fetch realistic Sarvam Bulbul TTS audio from backend
-    let sarvamAudio: string | null = null;
-    try {
-      sarvamAudio = await api.synthesizeTTS(initialGreeting, localeRef.current);
-    } catch (err) {
-      console.warn('Sarvam TTS unavailable for initial greeting, falling back to Web Speech', err);
-    }
+    // In parallel: fetch status audio from backend while intro is playing!
+    const statusAudioPromise = api.synthesizeTTS(statusText, localeRef.current).catch(() => null);
 
-    await tts.speak(initialGreeting, sarvamAudio, localeRef.current);
+    // Play the instant intro
+    await tts.speak(intro.text, intro.audioBase64, localeRef.current);
 
-    // Immediately start listening after greeting
-    if (callTimerRef.current) {
+    // If user closed the call while intro was playing, abort immediately
+    if (callSessionTokenRef.current !== currentToken || !isCallActiveRef.current) return;
+
+    // 2. Natural 1-second pause
+    setOrbState('thinking');
+    await new Promise((r) => setTimeout(r, 1000));
+    if (callSessionTokenRef.current !== currentToken || !isCallActiveRef.current) return;
+
+    // 3. Play the freshly synthesized status audio
+    const statusAudio = await statusAudioPromise;
+    if (callSessionTokenRef.current !== currentToken || !isCallActiveRef.current) return;
+
+    setAssistantMessage(statusText);
+    setOrbState('speaking');
+    await tts.speak(statusText, statusAudio, localeRef.current);
+
+    // If still active, transition to listening mode
+    if (callSessionTokenRef.current === currentToken && isCallActiveRef.current && !isPausedRef.current) {
       setOrbState('listening');
       await startRecording();
     }
   }, [startRecording]);
 
-  // End voice call
+  // End voice call (completely terminates audio, recording, and resets state)
   const endCall = useCallback(async () => {
+    callSessionTokenRef.current++;
+    isCallActiveRef.current = false;
+    isPausedRef.current = false;
+    setIsPaused(false);
     tts.stop();
     await stopRecording();
     if (callTimerRef.current) {
@@ -293,7 +334,29 @@ export function useVoiceCall({
     }
     setIsCallActive(false);
     setOrbState('idle');
+    setAssistantMessage('');
+    setUserTranscript('');
   }, [stopRecording]);
+
+  // Toggle pause/resume
+  const togglePause = useCallback(async () => {
+    if (!isCallActiveRef.current) return;
+
+    if (!isPaused) {
+      // Pause
+      setIsPaused(true);
+      isPausedRef.current = true;
+      tts.stop();
+      await stopRecording();
+      setOrbState('idle');
+    } else {
+      // Resume
+      setIsPaused(false);
+      isPausedRef.current = false;
+      setOrbState('listening');
+      await startRecording();
+    }
+  }, [isPaused, startRecording, stopRecording]);
 
   // Phonetic spelling resolution
   const resolveSpelling = useCallback(
@@ -302,7 +365,6 @@ export function useVoiceCall({
         onValuesExtracted({ [pendingSpellingVerification.fieldId]: confirmedName });
       }
       setPendingSpellingVerification(null);
-      // Assistant acknowledges verified spelling
       const ack =
         localeRef.current === 'hi-IN'
           ? `धन्यवाद! आपका नाम "${confirmedName}" दर्ज कर लिया गया है।`
@@ -327,6 +389,7 @@ export function useVoiceCall({
 
   useEffect(() => {
     return () => {
+      callSessionTokenRef.current++;
       tts.stop();
       if (callTimerRef.current) {
         clearInterval(callTimerRef.current);
@@ -336,6 +399,7 @@ export function useVoiceCall({
 
   return {
     isCallActive,
+    isPaused,
     orbState,
     assistantMessage,
     userTranscript,
@@ -347,6 +411,7 @@ export function useVoiceCall({
     isDoneRecommendingOptional,
     startCall,
     endCall,
+    togglePause,
     interruptAssistant,
     submitCurrentSpeechTurn,
     resolveSpelling,
