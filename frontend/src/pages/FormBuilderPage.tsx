@@ -37,9 +37,12 @@ export const FormBuilderPage: React.FC = () => {
   const [isPublishOpen, setIsPublishOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Auto-save draft in localStorage
+  // Auto-save active draft under dedicated storage key while keeping form.id intact
   useEffect(() => {
-    saveCustomForm({ ...form, id: form.id });
+    saveCustomForm(form, 'active_draft');
+    if (form.id && form.id !== 'active_draft') {
+      saveCustomForm(form, form.id);
+    }
   }, [form]);
 
   // Handlers for Header card
