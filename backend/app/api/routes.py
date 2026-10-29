@@ -4,6 +4,7 @@ from app.models.contracts import (ConfirmRequest, ConfirmationResponse, CreateSe
     ExtractionRequest, ExtractionResponse, ManualChange, PatchResponse, ReviewResponse,
     SessionResponse, SpeechResponse, ValidateRequest, ValidationResponse)
 from app.schemas.registry import get_form, list_forms
+from app.services.ai_adapter import apply_field_mapping
 from app.services.errors import APIError
 from app.services.session_service import (TTL_SECONDS, confirm, correct, propose,
                                          require_locale, snapshot)
@@ -115,7 +116,8 @@ async def extract(sid: str, body: ExtractionRequest, request: Request):
             raise APIError(400, "EMPTY_TRANSCRIPT", "Enter or record a transcript before extraction.")
         if not ai_service.extraction_available:
             raise APIError(503, "EXTRACTION_UNAVAILABLE", "Extraction is not integrated. Enter and check fields manually.")
-        return await ai_service.extract_from_transcript(body.transcript, body.language_code, session.form_id, session.values)
+        raw_extraction = await ai_service.extract_from_transcript(body.transcript, body.language_code, session.form_id, session.values)
+        return apply_field_mapping(session.form_id, body.transcript, raw_extraction, session.manual_fields)
 
 
 @router.post("/sessions/{sid}/assistant")
@@ -148,4 +150,5 @@ async def assistant_turn(sid: str, request: Request):
             audio_bytes=audio_bytes,
             filename=filename,
             transcript=transcript,
+            manual_fields=session.manual_fields,
         )

@@ -6,6 +6,7 @@ import httpx
 
 from app.ai.config import ai_config
 from app.models.contracts import Candidate, ExtractionResponse, Issue
+from app.services.ai_adapter import apply_field_mapping
 from app.services.errors import APIError
 
 
@@ -232,6 +233,8 @@ RULES:
         current_values: dict,
         transcript: str | None,
         language_code: str = "en-IN",
+        form_id: str | None = None,
+        manual_fields: set[str] | None = None,
     ) -> dict:
         """
         Interactive conversational voice agent turn:
@@ -246,9 +249,22 @@ RULES:
 
         # Step 1: Extract candidates if transcript is present
         candidates: list[Candidate] = []
+        issues: list[Issue] = []
         if transcript and transcript.strip():
             extraction = await self.extract_entities(transcript, language_code, form_schema, current_values)
-            candidates = extraction.candidates
+            effective_form_id = form_id or form_schema.get("$id")
+            if effective_form_id:
+                mapped = apply_field_mapping(
+                    form_id=effective_form_id,
+                    transcript=transcript,
+                    extraction=extraction,
+                    manual_fields=manual_fields,
+                )
+                candidates = mapped.candidates
+                issues = mapped.issues
+            else:
+                candidates = extraction.candidates
+                issues = list(extraction.issues)
 
         # Step 2: Merge proposed values into a simulated view
         merged_values = dict(current_values or {})
@@ -399,6 +415,7 @@ GUIDELINES:
 
         return {
             "candidates": [c.model_dump() for c in candidates],
+            "issues": [i.model_dump() for i in issues],
             "updated_values": merged_values,
             "missing_required": missing_required,
             "missing_optional": missing_optional,

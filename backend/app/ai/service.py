@@ -59,6 +59,7 @@ class AIService:
         audio_bytes: bytes | None = None,
         filename: str | None = None,
         transcript: str | None = None,
+        manual_fields: set[str] | None = None,
     ) -> dict:
         """
         Executes a complete interactive voice assistant turn:
@@ -93,6 +94,7 @@ class AIService:
             return {
                 "user_transcript": "",
                 "candidates": [],
+                "issues": [],
                 "updated_values": current_values,
                 "missing_required": [f for f in form_schema.get("required", []) if f not in current_values or not current_values[f]],
                 "missing_optional": [],
@@ -107,6 +109,8 @@ class AIService:
             current_values=current_values,
             transcript=user_text,
             language_code=locale,
+            form_id=form_id,
+            manual_fields=manual_fields,
         )
 
         # Generate voice output using Sarvam Bulbul
@@ -119,6 +123,7 @@ class AIService:
         return {
             "user_transcript": user_text,
             "candidates": turn_result["candidates"],
+            "issues": turn_result.get("issues", []),
             "updated_values": turn_result["updated_values"],
             "missing_required": turn_result["missing_required"],
             "missing_optional": turn_result["missing_optional"],
