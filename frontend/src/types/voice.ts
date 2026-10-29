@@ -12,9 +12,17 @@ export interface TurnCandidate {
   ambiguity_reason: string | null;
 }
 
+export interface TurnIssue {
+  field_id: string | null;
+  type: string;
+  message: string;
+  candidates?: any[] | null;
+}
+
 export interface AssistantTurnResponse {
   user_transcript: string;
   candidates: TurnCandidate[];
+  issues?: TurnIssue[];
   updated_values: Record<string, string | number | null>;
   missing_required: string[];
   missing_optional: string[];

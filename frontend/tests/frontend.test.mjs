@@ -107,3 +107,12 @@ test('ConfirmSession payload conformance: reviewed=true and revision integer', (
 
   assert.ok(apiContent.includes("body: JSON.stringify({ reviewed: true, revision })"));
 });
+test('AssistantTurnResponse type includes additive issues array conforming to Issue contract', () => {
+  const voiceTypesPath = path.resolve(__dirname, '../src/types/voice.ts');
+  const content = fs.readFileSync(voiceTypesPath, 'utf8');
+
+  assert.ok(content.includes('export interface TurnIssue'));
+  assert.ok(content.includes('field_id: string | null'));
+  assert.ok(content.includes('candidates?: any[] | null'));
+  assert.ok(content.includes('issues?: TurnIssue[]'));
+});
