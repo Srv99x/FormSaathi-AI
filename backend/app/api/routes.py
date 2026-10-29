@@ -150,4 +150,5 @@ async def assistant_turn(sid: str, request: Request):
             audio_bytes=audio_bytes,
             filename=filename,
             transcript=transcript,
+            manual_fields=session.manual_fields,
         )
