@@ -1,23 +1,177 @@
 import { useCallback, useRef, useState } from 'react';
-import { api } from '../services/api';
+import { api, isNetworkOrServerUnavailable } from '../services/api';
 import { FormSchema } from '../types/form';
 import { resolveFormSchema } from '../services/schemaMapper';
 import { ConfirmationRecord, FieldValidationStatus, ReviewResponse, SessionData } from '../types/session';
 
+const MONTH_NAMES: Record<string, number> = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+  jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1000 || year > 9999) {
+    return false;
+  }
+  const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+  const daysInMonths = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonths[month - 1];
+}
+
+/**
+ * Validates date input per CONTRACT.md and backend validators.py:
+ * - Strict ISO format (YYYY-MM-DD)
+ * - Explicit English named month (e.g. 3 April 2006)
+ * - Ambiguous slash dates (DD/MM/YYYY vs MM/DD/YYYY) require review
+ * - Reject impossible calendar dates (e.g. 2001-02-30) without rollover
+ * - Reject future dates
+ * - Check age boundary 12–100 (explicit manual ISO/named-month acknowledges outlier)
+ */
+export function checkDate(
+  value: string,
+  today: Date = new Date(),
+  manual: boolean = true
+): { parsed: string | null; status: FieldValidationStatus; message: string } {
+  const trimmed = value.trim();
+  let parsedYear: number | null = null;
+  let parsedMonth: number | null = null;
+  let parsedDay: number | null = null;
+
+  // 1. ISO format: YYYY-MM-DD
+  const isoMatch = trimmed.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/);
+  if (isoMatch) {
+    const y = parseInt(isoMatch[1], 10);
+    const m = parseInt(isoMatch[2], 10);
+    const d = parseInt(isoMatch[3], 10);
+    if (isValidCalendarDate(y, m, d)) {
+      parsedYear = y;
+      parsedMonth = m;
+      parsedDay = d;
+    }
+  } else {
+    // 2. Slash format: DD/MM/YYYY or MM/DD/YYYY
+    const slashMatch = trimmed.match(/^([0-9]{1,2})\/([0-9]{1,2})\/([0-9]{4})$/);
+    if (slashMatch) {
+      const first = parseInt(slashMatch[1], 10);
+      const second = parseInt(slashMatch[2], 10);
+      const year = parseInt(slashMatch[3], 10);
+
+      const validCombinations: { d: number; m: number }[] = [];
+      if (isValidCalendarDate(year, second, first)) {
+        validCombinations.push({ d: first, m: second });
+      }
+      if (first !== second && isValidCalendarDate(year, first, second)) {
+        validCombinations.push({ d: second, m: first });
+      }
+
+      if (validCombinations.length === 0) {
+        return {
+          parsed: null,
+          status: 'invalid',
+          message: 'Enter a real date as YYYY-MM-DD or 3 April 2006.',
+        };
+      }
+      if (validCombinations.length > 1) {
+        return {
+          parsed: null,
+          status: 'needs_review',
+          message: 'Ambiguous date. Enter an explicit day, month and year (YYYY-MM-DD).',
+        };
+      }
+      parsedYear = year;
+      parsedMonth = validCombinations[0].m;
+      parsedDay = validCombinations[0].d;
+    } else {
+      // 3. Named month format: e.g. "3 April 2006" or "03 April 2006"
+      const namedMatch = trimmed.match(/^([0-9]{1,2})\s+([A-Za-z]+)\s+([0-9]{4})$/);
+      if (namedMatch) {
+        const d = parseInt(namedMatch[1], 10);
+        const monthKey = namedMatch[2].toLowerCase();
+        const y = parseInt(namedMatch[3], 10);
+        const m = MONTH_NAMES[monthKey];
+        if (m && isValidCalendarDate(y, m, d)) {
+          parsedYear = y;
+          parsedMonth = m;
+          parsedDay = d;
+        }
+      }
+    }
+  }
+
+  if (parsedYear === null || parsedMonth === null || parsedDay === null) {
+    return {
+      parsed: null,
+      status: 'invalid',
+      message: 'Enter a real date as YYYY-MM-DD or 3 April 2006.',
+    };
+  }
+
+  const isoFormatted = `${String(parsedYear).padStart(4, '0')}-${String(parsedMonth).padStart(2, '0')}-${String(parsedDay).padStart(2, '0')}`;
+
+  const todayYear = today.getFullYear();
+  const todayMonth = today.getMonth() + 1;
+  const todayDay = today.getDate();
+
+  // Check if date of birth is in the future
+  if (
+    parsedYear > todayYear ||
+    (parsedYear === todayYear && parsedMonth > todayMonth) ||
+    (parsedYear === todayYear && parsedMonth === todayMonth && parsedDay > todayDay)
+  ) {
+    return {
+      parsed: isoFormatted,
+      status: 'invalid',
+      message: 'Date of birth cannot be in the future.',
+    };
+  }
+
+  // Calculate age: today.year - parsed.year - ((today.month, today.day) < (parsed.month, parsed.day))
+  let age = todayYear - parsedYear;
+  if (todayMonth < parsedMonth || (todayMonth === parsedMonth && todayDay < parsedDay)) {
+    age--;
+  }
+
+  if (age < 12 || age > 100) {
+    if (!manual || trimmed.includes('/')) {
+      return {
+        parsed: isoFormatted,
+        status: 'needs_review',
+        message: 'Age is outside 12–100. Please explicitly check and enter the date.',
+      };
+    }
+    return {
+      parsed: isoFormatted,
+      status: 'valid',
+      message: 'Date explicitly checked; age is outside the typical student range.',
+    };
+  }
+
+  return {
+    parsed: isoFormatted,
+    status: 'valid',
+    message: 'Valid date of birth.',
+  };
+}
+
 export function computeLocalValidation(
   schema: FormSchema,
-  currentValues: Record<string, string | number | null>
+  currentValues: Record<string, string | number | null>,
+  today: Date = new Date(),
+  manual: boolean = true
 ): {
   fieldStatuses: Record<string, FieldValidationStatus>;
   fieldMessages: Record<string, string>;
   missingFields: string[];
   invalidFields: string[];
+  needsReviewFields: string[];
   canConfirm: boolean;
 } {
   const fieldStatuses: Record<string, FieldValidationStatus> = {};
   const fieldMessages: Record<string, string> = {};
   const missingFields: string[] = [];
   const invalidFields: string[] = [];
+  const needsReviewFields: string[] = [];
 
   for (const field of schema.fields) {
     const rawVal = currentValues[field.id];
@@ -59,13 +213,33 @@ export function computeLocalValidation(
       }
     }
 
-    // Check tel / mobile
+    // Check tel / mobile — supports optional explicit +91 without corrupting 10-digit numbers starting with 91
     if (field.type === 'tel' || field.id === 'mobile') {
-      const digits = strVal.replace(/[\s\-+]/g, '').replace(/^91/, '');
-      if (!/^[6-9]\d{9}$/.test(digits)) {
+      let clean = strVal.replace(/[\s\-()]/g, '');
+      if (clean.startsWith('+91')) {
+        clean = clean.slice(3);
+      }
+      if (!/^[6-9][0-9]{9}$/.test(clean)) {
         fieldStatuses[field.id] = 'invalid';
-        fieldMessages[field.id] = 'Must be a valid 10-digit Indian mobile number starting with 6-9.';
+        fieldMessages[field.id] = 'Enter a valid 10-digit Indian mobile number beginning with 6–9.';
         invalidFields.push(field.id);
+        continue;
+      }
+    }
+
+    // Check date fields
+    if (field.type === 'date' || field.id === 'date_of_birth') {
+      const dateCheck = checkDate(strVal, today, manual);
+      if (dateCheck.status === 'invalid') {
+        fieldStatuses[field.id] = 'invalid';
+        fieldMessages[field.id] = dateCheck.message;
+        invalidFields.push(field.id);
+        continue;
+      }
+      if (dateCheck.status === 'needs_review') {
+        fieldStatuses[field.id] = 'needs_review';
+        fieldMessages[field.id] = dateCheck.message;
+        needsReviewFields.push(field.id);
         continue;
       }
     }
@@ -108,15 +282,129 @@ export function computeLocalValidation(
     fieldStatuses[field.id] = 'valid';
   }
 
-  const canConfirm = missingFields.length === 0 && invalidFields.length === 0;
+  const canConfirm = missingFields.length === 0 && invalidFields.length === 0 && needsReviewFields.length === 0;
 
   return {
     fieldStatuses,
     fieldMessages,
     missingFields,
     invalidFields,
+    needsReviewFields,
     canConfirm,
   };
+}
+
+export interface ConfirmationFlowParams {
+  session: SessionData;
+  values: Record<string, string | number | null>;
+  schema: FormSchema;
+  apiClient: {
+    getReview: (sessionId: string) => Promise<ReviewResponse>;
+    confirmSession: (sessionId: string, revision: number) => Promise<ConfirmationRecord>;
+  };
+  onRecordConfirmed?: (rec: ConfirmationRecord) => void;
+}
+
+/**
+ * Executes confirmation with strict separation between authoritative backend rejections
+ * and genuine network transport failures. Never converts 4xx or rejected reviews into local successes.
+ */
+export async function executeConfirmation({
+  session,
+  values,
+  schema,
+  apiClient,
+  onRecordConfirmed,
+}: ConfirmationFlowParams): Promise<ConfirmationRecord> {
+  const isLocalSession = session.session_id.startsWith('local-session-');
+
+  if (isLocalSession) {
+    const validation = computeLocalValidation(schema, values);
+    if (!validation.canConfirm) {
+      const issues = [...validation.missingFields, ...validation.invalidFields, ...validation.needsReviewFields];
+      throw new Error(
+        `Cannot confirm local session: required field(s) missing or invalid (${issues.join(', ') || 'validation failed'}).`
+      );
+    }
+    const localRec: ConfirmationRecord = {
+      confirmation_id: `FS-LOCAL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+      status: 'confirmed_local',
+      form_id: session.form_id,
+      revision: session.revision,
+      confirmed_at: new Date().toISOString(),
+      record: { ...values },
+    };
+    onRecordConfirmed?.(localRec);
+    return localRec;
+  }
+
+  // Online backend confirmation path:
+  // 1. Fetch authoritative fresh review snapshot
+  let freshReview: ReviewResponse;
+  try {
+    freshReview = await apiClient.getReview(session.session_id);
+  } catch (reviewErr: unknown) {
+    if (isNetworkOrServerUnavailable(reviewErr)) {
+      // Genuine network transport failure during review fetch
+      const validation = computeLocalValidation(schema, values);
+      if (!validation.canConfirm) {
+        const issues = [...validation.missingFields, ...validation.invalidFields, ...validation.needsReviewFields];
+        throw new Error(
+          `Cannot confirm form: network unavailable and local validation failed (${issues.join(', ') || 'validation failed'}).`
+        );
+      }
+      const localRec: ConfirmationRecord = {
+        confirmation_id: `FS-LOCAL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+        status: 'confirmed_local',
+        form_id: session.form_id,
+        revision: session.revision,
+        confirmed_at: new Date().toISOString(),
+        record: { ...values },
+      };
+      onRecordConfirmed?.(localRec);
+      return localRec;
+    }
+    // Authoritative server error response (e.g. 404 session not found, 400) -> rethrow!
+    throw reviewErr;
+  }
+
+  // 2. Authoritative check on review snapshot:
+  if (!freshReview.can_confirm) {
+    const missingInfo = freshReview.missing?.length ? ` (Missing: ${freshReview.missing.join(', ')})` : '';
+    throw new Error(`Cannot confirm form: backend review rejected confirmation${missingInfo}.`);
+  }
+
+  // 3. Confirm with matching revision
+  try {
+    const record = await apiClient.confirmSession(session.session_id, freshReview.revision);
+    onRecordConfirmed?.(record);
+    return record;
+  } catch (confirmErr: unknown) {
+    // Authoritative server error response (e.g. 409 STALE_REVIEW, 400, 422) -> rethrow!
+    if (!isNetworkOrServerUnavailable(confirmErr)) {
+      throw confirmErr;
+    }
+
+    // Genuine network transport failure during confirmSession call
+    const validation = computeLocalValidation(schema, values);
+    if (!validation.canConfirm) {
+      const issues = [...validation.missingFields, ...validation.invalidFields, ...validation.needsReviewFields];
+      throw new Error(
+        `Cannot confirm form: network unavailable and local validation failed (${issues.join(', ') || 'validation failed'}).`
+      );
+    }
+
+    const localRec: ConfirmationRecord = {
+      confirmation_id: `FS-LOCAL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+      status: 'confirmed_local',
+      form_id: session.form_id,
+      revision: session.revision,
+      confirmed_at: new Date().toISOString(),
+      record: { ...values },
+    };
+    onRecordConfirmed?.(localRec);
+    return localRec;
+  }
 }
 
 export function useFormSession(initialSchema?: FormSchema | null) {
@@ -241,13 +529,18 @@ export function useFormSession(initialSchema?: FormSchema | null) {
         setCanConfirm(review.can_confirm);
         setRevision(review.revision);
       } catch (err) {
-        // Local validation fallback if online call fails
-        const currentSchema = schemaRef.current || resolveFormSchema(session.form_id);
-        const validation = computeLocalValidation(currentSchema, nextValues);
-        setFieldStatuses(validation.fieldStatuses);
-        setFieldMessages(validation.fieldMessages);
-        setMissingFields(validation.missingFields);
-        setCanConfirm(validation.canConfirm);
+        // Local validation fallback if network is unavailable
+        if (isNetworkOrServerUnavailable(err)) {
+          const currentSchema = schemaRef.current || resolveFormSchema(session.form_id);
+          const validation = computeLocalValidation(currentSchema, nextValues);
+          setFieldStatuses(validation.fieldStatuses);
+          setFieldMessages(validation.fieldMessages);
+          setMissingFields(validation.missingFields);
+          setCanConfirm(validation.canConfirm);
+        } else {
+          // Authoritative server error response
+          console.warn('Backend rejected field patch:', err);
+        }
       }
     },
     [session, values, revision]
@@ -290,13 +583,16 @@ export function useFormSession(initialSchema?: FormSchema | null) {
         setCanConfirm(review.can_confirm);
         setRevision(review.revision);
       } catch (err) {
-        console.warn('Batch update sync notice', err);
-        const currentSchema = schemaRef.current || resolveFormSchema(session.form_id);
-        const validation = computeLocalValidation(currentSchema, nextValues);
-        setFieldStatuses(validation.fieldStatuses);
-        setFieldMessages(validation.fieldMessages);
-        setMissingFields(validation.missingFields);
-        setCanConfirm(validation.canConfirm);
+        if (isNetworkOrServerUnavailable(err)) {
+          const currentSchema = schemaRef.current || resolveFormSchema(session.form_id);
+          const validation = computeLocalValidation(currentSchema, nextValues);
+          setFieldStatuses(validation.fieldStatuses);
+          setFieldMessages(validation.fieldMessages);
+          setMissingFields(validation.missingFields);
+          setCanConfirm(validation.canConfirm);
+        } else {
+          console.warn('Backend rejected batch update:', err);
+        }
       }
     },
     [session, values, revision]
@@ -330,86 +626,38 @@ export function useFormSession(initialSchema?: FormSchema | null) {
       setRevision(review.revision);
       return review;
     } catch (err) {
-      console.warn('Review call fallback', err);
-      const currentSchema = schemaRef.current || resolveFormSchema(session.form_id);
-      const validation = computeLocalValidation(currentSchema, values);
-      return {
-        values,
-        field_statuses: validation.fieldStatuses,
-        messages: validation.fieldMessages,
-        missing: validation.missingFields,
-        invalid: validation.invalidFields,
-        conflicts: [],
-        can_confirm: validation.canConfirm,
-        revision,
-      };
+      if (isNetworkOrServerUnavailable(err)) {
+        console.warn('Review call fallback to local snapshot', err);
+        const currentSchema = schemaRef.current || resolveFormSchema(session.form_id);
+        const validation = computeLocalValidation(currentSchema, values);
+        return {
+          values,
+          field_statuses: validation.fieldStatuses,
+          messages: validation.fieldMessages,
+          missing: validation.missingFields,
+          invalid: validation.invalidFields,
+          conflicts: [],
+          can_confirm: validation.canConfirm,
+          revision,
+        };
+      }
+      throw err;
     }
   }, [session, values, revision]);
 
   const confirmLocal = useCallback(async (): Promise<ConfirmationRecord> => {
     if (!session) throw new Error('No active session');
+    const currentSchema = schemaRef.current || resolveFormSchema(session.form_id);
 
-    const isLocalSession = session.session_id.startsWith('local-session-');
-
-    if (isLocalSession) {
-      const currentSchema = schemaRef.current || resolveFormSchema(session.form_id);
-      const validation = computeLocalValidation(currentSchema, values);
-
-      if (!validation.canConfirm) {
-        const missingList = validation.missingFields.join(', ');
-        throw new Error(
-          `Cannot confirm local session: required field(s) missing or invalid (${missingList || 'validation failed'}).`
-        );
-      }
-
-      const localRec: ConfirmationRecord = {
-        confirmation_id: `FS-LOCAL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-        status: 'confirmed_local',
-        form_id: session.form_id,
-        revision,
-        confirmed_at: new Date().toISOString(),
-        record: { ...values },
-      };
-      setConfirmation(localRec);
-      return localRec;
-    }
-
-    // Online backend confirmation path
-    try {
-      // Pre-confirm review snapshot sets session.reviewed_revision = session.revision
-      // on the backend, ensuring full compliance with CONTRACT.md against 409 STALE_REVIEW.
-      const freshReview = await api.getReview(session.session_id);
-      setRevision(freshReview.revision);
-      setCanConfirm(freshReview.can_confirm);
-
-      if (!freshReview.can_confirm) {
-        throw new Error(
-          'Cannot confirm form: required fields are missing or invalid according to backend review.'
-        );
-      }
-
-      const record = await api.confirmSession(session.session_id, freshReview.revision);
-      setConfirmation(record);
-      return record;
-    } catch (err: any) {
-      // If backend network call failed, verify local validation before issuing fallback local receipt
-      const currentSchema = schemaRef.current || resolveFormSchema(session.form_id);
-      const validation = computeLocalValidation(currentSchema, values);
-      if (!validation.canConfirm) {
-        throw err;
-      }
-
-      const localRec: ConfirmationRecord = {
-        confirmation_id: `FS-LOCAL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-        status: 'confirmed_local',
-        form_id: session.form_id,
-        revision,
-        confirmed_at: new Date().toISOString(),
-        record: { ...values },
-      };
-      setConfirmation(localRec);
-      return localRec;
-    }
+    return executeConfirmation({
+      session: { ...session, revision },
+      values,
+      schema: currentSchema,
+      apiClient: api,
+      onRecordConfirmed: (rec) => {
+        setConfirmation(rec);
+      },
+    });
   }, [revision, session, values]);
 
   return {
