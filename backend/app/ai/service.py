@@ -73,9 +73,33 @@ class AIService:
 
         # Transcribe audio if provided
         user_text = transcript
-        if audio_bytes and len(audio_bytes) > 0:
-            stt_result = await self.transcribe_speech(audio_bytes, filename or "audio.webm", locale)
-            user_text = stt_result.transcript
+        audio_provided = bool(audio_bytes and len(audio_bytes) > 0)
+        if audio_provided:
+            try:
+                stt_result = await self.transcribe_speech(audio_bytes, filename or "audio.webm", locale)
+                user_text = (stt_result.transcript or "").strip()
+            except Exception:
+                user_text = ""
+
+        # If audio was sent but nothing was transcribed (silence/noise)
+        if audio_provided and not user_text:
+            if locale == "hi-IN":
+                clarify_msg = "माफ़ कीजिए, मुझे आपकी आवाज़ साफ़ सुनाई नहीं दी। कृपया दोबारा बोलें।"
+            else:
+                clarify_msg = "Sorry, I couldn't hear that clearly. Could you please repeat?"
+            
+            speaker = "aditya" if locale == "hi-IN" else "priya"
+            audio_base64 = await self.sarvam.synthesize(clarify_msg, language_code=locale, speaker=speaker) if self.sarvam.is_configured else None
+            return {
+                "user_transcript": "",
+                "candidates": [],
+                "updated_values": current_values,
+                "missing_required": [f for f in form_schema.get("required", []) if f not in current_values or not current_values[f]],
+                "missing_optional": [],
+                "assistant_message": clarify_msg,
+                "assistant_audio_base64": audio_base64,
+                "is_complete": False,
+            }
 
         # Run conversational agent reasoning
         turn_result = await self.groq.dialog_turn(
@@ -89,7 +113,7 @@ class AIService:
         audio_base64 = None
         assistant_message = turn_result.get("assistant_message", "")
         if assistant_message and self.sarvam.is_configured:
-            speaker = "arvind" if locale == "hi-IN" else "meera"
+            speaker = "aditya" if locale == "hi-IN" else "priya"
             audio_base64 = await self.sarvam.synthesize(assistant_message, language_code=locale, speaker=speaker)
 
         return {
@@ -100,6 +124,8 @@ class AIService:
             "missing_optional": turn_result["missing_optional"],
             "assistant_message": assistant_message,
             "assistant_audio_base64": audio_base64,
+            "name_candidate": turn_result.get("name_candidate"),
+            "name_spelling": turn_result.get("name_spelling"),
             "is_complete": turn_result["is_complete"],
         }
 
