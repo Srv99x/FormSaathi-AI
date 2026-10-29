@@ -338,6 +338,13 @@ Return JSON: {{"message": "Spoken assistant reply in target language", "is_compl
             else:
                 dialog_data = {"message": "Hello! Please share your remaining form details.", "is_complete": is_complete}
 
+        name_val = None
+        for c in candidates:
+            if c.field_id == "full_name" and c.value and not c.uncertain:
+                name_val = str(c.value)
+                break
+        name_spelling = "-".join(list(name_val.replace(" ", "").upper())) if name_val else None
+
         return {
             "candidates": [c.model_dump() for c in candidates],
             "issues": [i.model_dump() for i in issues],
@@ -345,7 +352,7 @@ Return JSON: {{"message": "Spoken assistant reply in target language", "is_compl
             "missing_required": missing_required,
             "missing_optional": missing_optional,
             "assistant_message": dialog_data.get("message", ""),
-            "name_candidate": None,
-            "name_spelling": None,
+            "name_candidate": name_val if name_val else None,
+            "name_spelling": name_spelling if name_spelling else None,
             "is_complete": is_complete or bool(dialog_data.get("is_complete", False)),
         }

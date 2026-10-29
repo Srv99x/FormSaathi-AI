@@ -1,344 +1,145 @@
-# UX Flow — FormSaathi AI
+# FormSaathi AI — User Experience & Interface Flows (UX_FLOW.md)
 
-**Owner:** Akash Kalita (frontend, UX)
-**Status:** A1 — UX Flow and Bilingual Content
-**Branch:** feat/ui-akash
-**Contract reference:** docs/CONTRACT.md (Frozen milestone 1)
-
-> This document describes the nine-screen user journey, state transitions, and
-> all error states for the FormSaathi AI frontend. It is derived exclusively from
-> the frozen contract in `docs/CONTRACT.md` and the form schemas in
-> `backend/app/schemas/forms/`. No field names, form IDs, endpoint paths, or
-> option values are invented here.
+**Document Version:** 2.0.0 (Production Verified)  
+**Lead Designer & Frontend Owner:** Akash Kalita  
+**Core Deliverables:** Modern Conversational Voice Assistant, Responsive Form Filler, and Dynamic Visual Form Builder.
 
 ---
 
-## Privacy and confirmation notice
+## 1. Executive UX Philosophy
 
-FormSaathi AI is a local demo application. When a user confirms a form:
+FormSaathi AI delivers a modern, accessible interface tailored for diverse users across India. The UX eliminates anxiety around complex forms by pairing high-legibility visual forms with an intelligent, friendly voice assistant.
 
-- The backend returns `status: "confirmed_local"`. This means the form data is
-  stored in the server's in-memory session only, for up to 3600 seconds.
-- **The application does not submit data to any government authority, external
-  service, or database.**
-- Audio is sent to the backend for speech-to-text processing via the Sarvam API
-  (server-side). Audio is not persisted by the backend after transcription.
-- Transcripts are sent to the backend for structured extraction via the Sarvam
-  API (server-side). The frontend must display the transcript to the user and
-  obtain explicit human approval before calling the extract endpoint.
-- PDF export is **not implemented** in this milestone.
+### Key Pillars
+1. **Hands-Free Natural Conversation**: Users can fill forms by speaking naturally in Hindi (`hi-IN`) or English (`en-IN`). Voice activity detection automatically recognizes when the user stops talking, eliminating the friction of manual push-to-talk buttons.
+2. **Deterministic Transparency**: Every voice-extracted candidate is visibly populated into the respective field card with real-time validation badges.
+3. **Manual Sovereignty**: The user can click and edit any field at any time. The AI respects user corrections and never overwrites manual edits.
+4. **Pure Indian Voice Synthesis**: Spoken replies are synthesized via Sarvam Bulbul neural TTS, avoiding unnatural browser speech synthesis or concurrent audio artifacts.
 
 ---
 
-## Session locale vs. form field `preferred_language`
-
-| Concept | Values | Where used |
-|---|---|---|
-| Session locale (`locale`) | `en-IN`, `hi-IN` | Sent in `POST /api/sessions` body; controls UI language, speech-to-text language hint, and extract language hint. `as-IN` is rejected in this milestone. |
-| Form field `preferred_language` | `"English"`, `"Hindi"`, or `null` | A **form value** inside `student_registration_v1` only. Optional. The user fills it like any other field. Completely separate from the session locale. |
-
----
-
-## Nine-screen journey
+## 2. Core User Workflows
 
 ```
-[S1 Welcome]
-     │
-     ▼
-[S2 Choose Form]
-     │  GET /api/forms
-     ▼
-[S3 Choose Language]
-     │  POST /api/sessions {form_id, locale}
-     ▼
-[S4 Record]
-     │  POST /api/sessions/{sid}/speech  (multipart: file, locale)
-     │  ┌─ 503 ASR_UNAVAILABLE ──────────────── S4 error state (retryable)
-     │  ├─ 413 / 415 / 422 ─────────────────── S4 error state (actionable)
-     │  └─ success → transcript displayed
-     ▼
-[S5 Transcript Review]   ← user edits transcript text; must explicitly approve
-     │  [Approve] button → POST /api/sessions/{sid}/extract {transcript, language_code}
-     │  ┌─ 503 EXTRACTION_UNAVAILABLE ────────── S5 error state (retryable)
-     │  └─ success {candidates, issues}
-     ▼
-[S6 Filled Form]         ← candidates shown per field; all editable
-     │  PATCH /api/sessions/{sid}/fields {field_id, value, source:"manual"} per edit
-     │  POST /api/sessions/{sid}/validate {proposed_values} for batch check
-     │  └─ fields with missing/invalid status → S7 Questions
-     ▼
-[S7 Questions]           ← one question at a time for missing/ambiguous fields
-     │  PATCH /api/sessions/{sid}/fields per answer
-     │  └─ all resolved → S8 Final Review
-     ▼
-[S8 Final Review]        ← GET /api/sessions/{sid}/review
-     │  └─ can_confirm: true required to proceed
-     │  POST /api/sessions/{sid}/confirm {reviewed: true, revision: <int>}
-     │  ┌─ 409 stale/blocked ──────────────── back to S8 with error
-     │  └─ success {confirmation_id, status:"confirmed_local"}
-     ▼
-[S9 Confirmed Locally]
+┌────────────────────────────────────────────────────────────────────────┐
+│                        FormSaathi AI Navigation                         │
+└────────────────────────────────────────────────────────────────────────┘
+                    │                                    │
+                    ▼                                    ▼
+       ┌────────────────────────┐           ┌────────────────────────┐
+       │   Form Filler Page     │           │   Form Builder Page    │
+       │   (/form/:formId)      │           │   (/builder)           │
+       └────────────────────────┘           └────────────────────────┘
+                    │                                    │
+                    ▼                                    ▼
+   ┌────────────────────────────────┐       ┌────────────────────────┐
+   │ Context-Aware Voice Assistant  │       │ Create & Edit Schema   │
+   │ - Automatic Field Inspection   │       │ - Add / Reorder Fields │
+   │ - VAD Silence Auto-Cutoff      │       │ - Configure Enums/Date │
+   │ - Sarvam Bulbul Spoken Reply   │       │ - Export & Publish     │
+   └────────────────────────────────┘       └────────────────────────┘
+                    │                                    │
+                    ▼                                    ▼
+   ┌────────────────────────────────┐       ┌────────────────────────┐
+   │ Real-time Field Auto-Fill      │       │ Instant Test Preview   │
+   │ - Live Validation Badges       │       └────────────────────────┘
+   │ - Manual Edit Safeguard        │
+   └────────────────────────────────┘
+                    │
+                    ▼
+   ┌────────────────────────────────┐
+   │ Review & Local Confirmation    │
+   │ - Revision-Bound Check         │
+   │ - Immutable Printable Receipt  │
+   └────────────────────────────────┘
 ```
 
 ---
 
-## Screen specifications
+## 3. Workflow 1: Form Filler Experience (`/form/:formId`)
 
-### S1 — Welcome
+### 3.1 Initial Form State & Inspection
+1. **Form Load**: The user opens a form (e.g. `student_registration_v1` or `student_assistance_v1`).
+2. **Field Rendering**: Field cards render in structured schema order with clear type indicators:
+   - Full Name (Text)
+   - Date of Birth (Calendar date with ISO / named-month parsing)
+   - Mobile Number (10 digits with automatic prefix stripping)
+   - Programme & State (Dropdown selection with search and "Other" support)
+3. **Contextual Status**: Each card shows an active badge:
+   - `Required` (Red asterisk / badge)
+   - `Valid` (Green checkmark)
+   - `Needs Review` (Amber badge for age outliers or unlisted choices)
+   - `Invalid` (Red inline error with clear corrective explanation)
 
-**Purpose:** Orient the user, set accurate expectations about what the app does and
-does not do.
+### 3.2 Activating the Voice Assistant
+1. **Floating Action Button (FAB)**: Located at the bottom right corner of the screen.
+2. **Expansion to Voice Card**: Tapping the button expands a sleek glassmorphism assistant card displaying:
+   - Animated Tri-State Voice Orb (`Listening`, `Thinking`, `Speaking`).
+   - Live transcription preview and audio waveform.
+   - Spoken subtitle response and assistant status.
+3. **Smart Form Context Greeting**:
+   - On opening, the assistant scans the form values.
+   - If empty: *"Hello! I am your FormSaathi assistant for Student Registration. Let's get started. What is your full name?"*
+   - If partially filled: *"Hello! I see you have already filled your name and mobile number. Let's continue with your date of birth."*
+   - In Hindi: *"नमस्ते! मैं फॉर्मसाथी हूँ। आइए फॉर्म भरना शुरू करें। कृपया अपना पूरा नाम बताएं।"*
 
-**Entry condition:** App load.
-**Exit condition:** User taps "Get Started".
-**API calls:** None on this screen. (Optionally `GET /api/health` in background to
-determine whether AI services are available, so S4/S5 can show early warnings.)
+### 3.3 Continuous Hands-Free Speech Loop
+1. **Voice Activity Detection (VAD)**:
+   - The user speaks their information: *"My name is Pooja Das and I live in Guwahati"*.
+   - When the user pauses for 1.35 seconds, the system automatically detects silence and finalizes the audio buffer.
+2. **Unified AI Turn (`POST /api/sessions/{sid}/assistant`)**:
+   - Audio is streamed to Sarvam Saaras v4 for high-accuracy Indian speech-to-text.
+   - Transcript and current field state are evaluated by Groq Llama 3.3.
+   - Spoken audio is generated using Sarvam Bulbul neural TTS.
+3. **Simultaneous UI Updates**:
+   - `Full Name` auto-fills with "Pooja Das" (green flash animation).
+   - `City` auto-fills with "Guwahati".
+   - The assistant speaks back warmly: *"Thanks, Pooja! Got your city as Guwahati. What is your date of birth?"*
+4. **Barge-In Support**:
+   - The user can tap anywhere or speak to pause the assistant and deliver new information immediately.
 
-**Required UI elements:**
-- App name and tagline.
-- Short description of the voice-to-form workflow.
-- Honest notice: form data is processed by a server-side AI API; confirmation is
-  local to this demo session; no external submission occurs.
-- Primary CTA: Get Started / शुरू करें.
-
----
-
-### S2 — Choose Form
-
-**Purpose:** Let the user pick exactly one of the two supported forms.
-
-**Entry condition:** User tapped "Get Started".
-**Exit condition:** User selects a form and taps "Continue".
-**API calls:** `GET /api/forms` — fetches `[{id, title, description}]`.
-
-**Supported form IDs (contract-frozen):**
-
-| `id` | `title` |
-|---|---|
-| `student_registration_v1` | Student Registration |
-| `student_assistance_v1` | Student Assistance Request |
-
-**Required UI elements:**
-- Card list of forms from API response (do not hardcode titles; use API `title` field).
-- Selected form shows a clear focus/active state.
-- "Continue" button disabled until one form is selected.
-- If `GET /api/forms` fails: show inline error with retry option.
-
----
-
-### S3 — Choose Language
-
-**Purpose:** Set the session locale used for all subsequent API calls and UI copy.
-
-**Entry condition:** User selected a form.
-**Exit condition:** User selects a language and taps "Set Language & Continue".
-**API calls:** `POST /api/sessions` with `{form_id, locale}` → `{session_id, form_id, revision, expires_in_seconds}`.
-
-**Supported locales:**
-
-| Display name | `locale` value sent to API |
-|---|---|
-| English | `en-IN` |
-| हिन्दी | `hi-IN` |
-
-- `as-IN` must **not** be offered; it is rejected by the backend in this milestone.
-- Selected locale controls all subsequent UI copy and is sent as `locale` in every
-  relevant API call.
-- Remind user that session lasts 3600 seconds and is not persisted across browser
-  refreshes.
+### 3.4 Review & Local Confirmation
+1. **Pre-Confirmation Check**:
+   - Once all mandatory fields are satisfied, the assistant prompts: *"All required fields are completed! You can provide optional details or click Review & Confirm."*
+2. **Review Modal**:
+   - Clicking **Review & Confirm** issues `GET /api/sessions/{sid}/review`.
+   - The user views a clean summary card of all entered values and their validation statuses.
+3. **Local Confirmation**:
+   - Tapping **Confirm Submission** submits `POST /api/sessions/{sid}/confirm` with the verified revision number.
+   - The session is locked in `confirmed_local` state and renders a printable confirmation slip with a unique reference ID and timestamp.
 
 ---
 
-### S4 — Record
+## 4. Workflow 2: Visual Form Builder (`/builder`)
 
-**Purpose:** Capture the user's voice describing their form details.
+### 4.1 Form Design Canvas
+- **Header Card**: Edit form title, institutional subtitle, and instructions.
+- **Dynamic Question Cards**:
+  - Add text, paragraph, dropdown, date, phone, number, or email questions.
+  - Reorder questions using drag handles.
+  - Toggle `Required` flags.
+  - Configure enumeration choices (e.g., custom courses, departments, or categories) with one-click **Add "Other"** option.
+- **Form Settings**:
+  - Choose default spoken language hint (`en-IN` or `hi-IN`).
+  - Configure submission notes and confirmation messages.
 
-**Entry condition:** Session created (`session_id` in state).
-**Exit condition:** Successful transcript received, or user retries.
-**API calls:** `POST /api/sessions/{sid}/speech` (multipart: `file`, `locale`).
-
-**Recording constraints (enforced client-side before upload):**
-- Max duration: 25 seconds (server limit is 30; client enforces 25 as buffer).
-- Accepted formats: `audio/webm`, `audio/wav`, `audio/mpeg`, `audio/ogg`.
-- Min duration check: warn if clip appears silent (< 1 second of audio data).
-
-**States and transitions:**
-
-| State | Description |
-|---|---|
-| `idle` | Microphone not yet started. |
-| `permission_denied` | User or browser denied microphone access. |
-| `listening` | MediaRecorder active; waveform visualizer running. |
-| `processing` | Audio uploaded; awaiting API response. |
-| `error_503` | Backend returned `503 ASR_UNAVAILABLE`. Retryable. |
-| `error_502` | Backend returned `502` — upstream Sarvam API error. Retryable. |
-| `error_504` | Backend returned `504` — speech request timed out. Retryable. |
-| `error_size` | Audio exceeds 10 MB (`413`). |
-| `error_codec` | Unsupported audio format (`415`). |
-| `error_duration` | Audio too short or exceeds 30 s (`422`). |
-| `success` | Transcript received; advance to S5. |
+### 4.2 Template Management & Publishing
+- **Switch Templates**: Instantly switch between `student_registration_v1`, `student_assistance_v1`, or start from scratch.
+- **Draft Persistence**: Auto-saves active drafts in local storage using isolated keys.
+- **Publish & Share**:
+  - Generates direct respondent links (`/form/:formId`).
+  - Displays instant QR code for mobile respondent scanning.
+  - Copy share link with single-click clipboard confirmation.
 
 ---
 
-### S5 — Transcript Review
+## 5. Error Handling & Edge States
 
-**Purpose:** Show the transcript from speech-to-text; let the user read, correct,
-and explicitly approve it before any extraction happens.
-
-**Entry condition:** Transcript text available in state.
-**Exit condition (approve):** User taps "Approve & Extract" — triggers extract call.
-**Exit condition (reject):** User taps "Re-record" — returns to S4.
-**API calls (on approve):** `POST /api/sessions/{sid}/extract` with `{transcript, language_code}`.
-
-> **Critical gate:** The extract endpoint must never be called without explicit
-> user approval of the transcript text. The UI must not auto-advance.
-
-**States and transitions:**
-
-| State | Description |
-|---|---|
-| `reviewing` | User reading/editing transcript text. |
-| `extracting` | Waiting for extract API response. |
-| `error_503` | Backend returned `503 EXTRACTION_UNAVAILABLE`. Retryable. |
-| `success` | Candidates and issues received; advance to S6. |
-
-**Extract response shape (from contract):**
-- `candidates`: array of `{field_id, value, evidence_text, uncertain, ambiguity_reason}`.
-- `issues`: array of `{field_id|null, type, message, candidates?}`.
-- No fabricated candidates are displayed. If service is unavailable (`503`), the
-  user is informed and offered retry or manual entry path (skip extract, go to S6
-  with all fields empty/editable).
-
----
-
-### S6 — Filled Form
-
-**Purpose:** Show all form fields, pre-populated from extract candidates where
-available, all editable by the user.
-
-**Entry condition:** Extract returned candidates (or user skipped extract after 503).
-**Exit condition:** User taps "Next: Review Questions" (if missing/invalid fields)
-or "Go to Final Review" (if `can_confirm` is true).
-**API calls:**
-- `PATCH /api/sessions/{sid}/fields` with `{field_id, value, source: "manual"}` on every user edit.
-- `POST /api/sessions/{sid}/validate` with `{proposed_values}` to batch-check before advancing.
-
-**Field display rules:**
-- Every field from `GET /api/forms/{form_id}` is rendered, in schema order.
-- Candidate value pre-filled if provided; `uncertain: true` candidates are visually
-  flagged (e.g., amber badge).
-- All values remain editable. Manual edits always use `source: "manual"` in PATCH.
-- Validation statuses from contract: `ok`, `missing`, `invalid`, `needs_review`, `conflict`.
-- `missing` and `invalid` fields are highlighted with clear inline messages.
-- `conflict` state: a proposed value contradicts an existing manual value; user must
-  explicitly choose via PATCH.
-
-**Field names and rules (from contract and schemas):**
-
-*student_registration_v1 required:*
-`full_name`, `date_of_birth`, `mobile`, `city`, `state`, `programme`
-
-*student_registration_v1 optional:*
-`email`, `institution`, `guardian_name`, `preferred_language`
-
-*student_assistance_v1 required:*
-`full_name`, `date_of_birth`, `mobile`, `institution`, `programme`,
-`year_of_study`, `city`, `state`, `assistance_type`
-
-*student_assistance_v1 optional:*
-`email`, `support_reason`
-
-**Enum options (exact values, case-insensitive match on input):**
-- `state`: Assam, Manipur, Meghalaya, Tripura, Arunachal Pradesh, Nagaland, Mizoram, Other Indian State/UT
-- `programme`: BSc Physics, BCA, BA English, Other
-- `assistance_type`: books, transport, fees, other
-- `preferred_language`: English, Hindi (or null/absent)
-- `year_of_study`: integer 1–5
-
----
-
-### S7 — Questions (Clarification)
-
-**Purpose:** Resolve remaining missing or ambiguous fields one at a time before
-allowing final confirmation.
-
-**Entry condition:** Validate response shows `missing` or `invalid` or
-`needs_review` fields, and `can_confirm` is false.
-**Exit condition:** All required fields resolved; `can_confirm` becomes true.
-**API calls:** `PATCH /api/sessions/{sid}/fields` per answer.
-
-**Question types and handling:**
-
-| Scenario | Trigger | UI action |
-|---|---|---|
-| Missing `date_of_birth` | Field absent or empty | Ask for DOB; offer date picker (ISO format `YYYY-MM-DD`) |
-| Missing `mobile` | Field absent or empty | Ask for mobile; enforce 10-digit `[6-9][0-9]{9}` pattern |
-| Ambiguous date | Extract issue `ambiguity_reason` on DOB | Show what was heard; ask user to confirm exact date |
-| Invalid `mobile` format | Validation `invalid` | Show pattern hint; let user retype |
-| Invalid enum value | Validation `invalid` on state/programme/etc. | Show allowed options; let user pick |
-| Age outside 12–100 | Validation `needs_review` | Warn; require explicit ISO/named-month correction to acknowledge |
-| Conflict | Validation `conflict` | Show both values; require user to pick one via PATCH |
-
-User can also choose to skip an **optional** field explicitly (leaving it null/absent).
-Required fields cannot be skipped.
-
----
-
-### S8 — Final Review
-
-**Purpose:** Show the complete form state; obtain explicit user confirmation.
-
-**Entry condition:** `can_confirm: true` in latest validate response.
-**Exit condition:** Successful confirm (`status: "confirmed_local"`), or user edits and revisits S6/S7.
-**API calls:**
-1. `GET /api/sessions/{sid}/review` — fetch final snapshot and current `revision`.
-2. `POST /api/sessions/{sid}/confirm` with `{reviewed: true, revision: <current>}`.
-
-**Rules:**
-- The "Confirm & Complete" button must be disabled until the user checks a
-  declaration checkbox acknowledging that details are correct.
-- If `POST /api/sessions/{sid}/confirm` returns `409` (stale or blocked review),
-  display an error, re-fetch review, and require the user to re-acknowledge the
-  declaration before trying again.
-- Any edit after fetching review invalidates confirmation; user must return to S6/S7.
-- The `GET /api/sessions/{sid}/review` must be called (and revision stored) before
-  the confirm payload is constructed.
-
----
-
-### S9 — Confirmed Locally
-
-**Purpose:** Acknowledge successful local confirmation; present accurate status.
-
-**Entry condition:** `POST /api/sessions/{sid}/confirm` returned `{confirmation_id, status: "confirmed_local", confirmed_at, record}`.
-**Exit condition:** User taps "Start New Form" (resets all state and returns to S1).
-
-**Required display:**
-- `confirmation_id` and `confirmed_at` timestamp from API response.
-- `status: "confirmed_local"` clearly labelled: *"Form saved in this demo session only."*
-- Explicit notice: *"This is not a submission to any government body or external authority."*
-- Session expiry warning: data is held in memory; it will be lost when the session
-  expires (3600 seconds) or the server restarts.
-- **No PDF download button** (not implemented in this milestone).
-- "Start New Form" button clears all frontend state and returns to S1.
-
----
-
-## Error states reference
-
-| Error | HTTP code / condition | User-facing action |
-|---|---|---|
-| Microphone permission denied | Browser API denial | Show guidance to enable mic in browser settings; offer manual-entry fallback path |
-| Recording too short | Client-side check | Warn before upload; let user re-record |
-| Audio too large | 413 from speech endpoint | Warn: recording too long; ask user to re-record under 25 s |
-| Unsupported audio codec | 415 from speech endpoint | Warn: audio format not supported; suggest re-recording |
-| Audio duration invalid | 422 from speech endpoint | Explain duration constraint; let user re-record |
-| Speech service unavailable | 503 ASR_UNAVAILABLE | Honest message: "Speech processing is not available right now." Offer retry or manual text entry |
-| Upstream speech provider error | 502 from speech endpoint | Message: "The speech service returned an error." Offer retry |
-| Speech request timed out | 504 from speech endpoint | Message: "The speech service took too long to respond." Offer retry |
-| Extraction service unavailable | 503 EXTRACTION_UNAVAILABLE | Honest message: "Automatic field extraction is not available right now." Offer retry or continue with empty fields |
-| Invalid locale on session creation | 400 from POST /api/sessions | Message: "The selected language is not supported." Prompt user to choose English or Hindi; do not offer as-IN |
-| Session not found / expired | 404 from any endpoint | Inform user the session has expired; restart from S1 |
-| Stale review on confirm | 409 from confirm endpoint | Inform user the form was edited after review; re-fetch review and re-confirm |
-| Network error | fetch() rejection | Generic offline/retry message |
-| Unknown server error | 5xx other | Show `request_id` from error envelope; suggest retry |
+| Scenario | System Reaction | User Guidance |
+|:---|:---|:---|
+| **Microphone Permission Denied** | Assistant displays warning banner; switches to manual input mode. | *"Microphone access blocked. Please enable mic permissions in your browser or type details directly."* |
+| **Silent Audio / Empty Speech** | VAD detects lack of speech energy; prompts user gently without error alerts. | *"I didn't catch that. Please speak your details when ready."* |
+| **Unlisted Dropdown Option Spoken** | Candidate flagged with `UNLISTED_OPTION`. Input left for user review. | Spoken assistant explains: *"That course isn't listed. You can choose 'Other' or select from the available options."* |
+| **Impossible Date (e.g. Feb 30)** | Date marked `INVALID_DATE` with red border. Form confirmation blocked. | Inline message: *"February 30 is an impossible calendar date. Please enter a valid date."* |
+| **Backend Unavailability** | Frontend automatically activates local session fallback. | Session transitions to offline mode, allowing manual entry and local confirmation. |
+| **Stale Review Attempt (HTTP 409)** | Session re-fetches latest values and increments revision. | *"Form was modified after review. Please re-check the summary before confirming."* |

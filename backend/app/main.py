@@ -70,6 +70,15 @@ def create_app(store: SessionStore | None = None) -> FastAPI:
     async def http_error(request: Request, exc: HTTPException):
         return error_response(exc.status_code, "HTTP_ERROR", "The requested operation is not available.")
 
+    @application.get("/", include_in_schema=False)
+    async def root():
+        return {
+            "name": "FormSaathi AI API",
+            "status": "online",
+            "docs": "/docs",
+            "health": "/api/health"
+        }
+
     application.include_router(router)
     return application
 
