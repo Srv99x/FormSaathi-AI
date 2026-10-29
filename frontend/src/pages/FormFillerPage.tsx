@@ -107,6 +107,7 @@ export const FormFillerPage: React.FC = () => {
     formSchema,
     sessionId: session?.session_id || null,
     locale,
+    currentValues: values,
     enableBargeIn: formSchema?.settings?.enableBargeIn ?? true,
     onValuesExtracted: (newVals) => {
       batchUpdateValues(newVals);

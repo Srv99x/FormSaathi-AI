@@ -1,8 +1,7 @@
 /**
- * Text-to-Speech audio player supporting:
- * 1. Base64 audio playback from Sarvam Bulbul TTS
- * 2. Fallback to browser SpeechSynthesis (Web Speech API)
- * 3. Sub-100ms Barge-in instant cancellation
+ * Dedicated Text-to-Speech audio player for Sarvam AI Bulbul.
+ * Plays pristine Base64 WAV audio with instant (< 50ms) barge-in cancellation.
+ * Browser SpeechSynthesis has been completely removed to prevent dual/concurrent voices.
  */
 
 class TTSService {
@@ -26,7 +25,7 @@ class TTSService {
   }
 
   /**
-   * Stop all active playback immediately (< 50ms)
+   * Stop all active audio playback immediately (< 50ms)
    */
   public stop(): void {
     if (this.currentAudio) {
@@ -34,16 +33,17 @@ class TTSService {
         this.currentAudio.pause();
         this.currentAudio.currentTime = 0;
         this.currentAudio.src = '';
-      } catch (err) {
+      } catch {
         // ignore
       }
       this.currentAudio = null;
     }
 
+    // Cancel any lingering browser speech if it was ever active
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel();
-      } catch (err) {
+      } catch {
         // ignore
       }
     }
@@ -55,84 +55,61 @@ class TTSService {
   }
 
   /**
-   * Plays speech from either base64 audio or browser synthesizer
+   * Plays speech using Sarvam Bulbul base64 audio.
+   * If base64Audio is not available, completes silently without invoking robotic browser speech.
    */
   public async speak(
-    text: string,
+    _text: string,
     base64Audio?: string | null,
-    locale: 'en-IN' | 'hi-IN' = 'en-IN'
+    _locale: 'en-IN' | 'hi-IN' = 'en-IN'
   ): Promise<void> {
     this.stop();
 
-    if (!text && !base64Audio) return;
+    if (!base64Audio || !base64Audio.trim()) {
+      // No browser speech fallback; complete cleanly
+      this.isSpeaking = false;
+      this.notifyEnd();
+      return;
+    }
 
     this.isSpeaking = true;
     this.notifyStart();
 
-    // 1. If base64 audio is provided from backend Sarvam Bulbul
-    if (base64Audio) {
-      try {
-        let audioSrc = base64Audio;
-        if (!audioSrc.startsWith('data:')) {
-          audioSrc = `data:audio/wav;base64,${base64Audio}`;
-        }
-
-        const audio = new Audio(audioSrc);
-        this.currentAudio = audio;
-
-        await new Promise<void>((resolve, reject) => {
-          audio.onended = () => {
-            this.isSpeaking = false;
-            this.currentAudio = null;
-            this.notifyEnd();
-            resolve();
-          };
-
-          audio.onerror = (e) => {
-            console.warn('HTMLAudio error, falling back to Web Speech API', e);
-            reject(e);
-          };
-
-          audio.play().catch(reject);
-        });
-        return;
-      } catch (err) {
-        console.warn('Sarvam base64 audio playback failed, falling back to Web Speech', err);
+    try {
+      let audioSrc = base64Audio.trim();
+      if (!audioSrc.startsWith('data:')) {
+        audioSrc = `data:audio/wav;base64,${audioSrc}`;
       }
-    }
 
-    // 2. Fallback to Web Speech API (speechSynthesis)
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window && text) {
+      const audio = new Audio(audioSrc);
+      this.currentAudio = audio;
+
       await new Promise<void>((resolve) => {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = locale === 'hi-IN' ? 'hi-IN' : 'en-IN';
-        utterance.rate = 1.0;
-        utterance.pitch = 1.0;
-
-        // Try to pick an appropriate Indian voice
-        const voices = window.speechSynthesis.getVoices();
-        const preferredVoice = voices.find((v) =>
-          locale === 'hi-IN' ? v.lang.includes('hi') : v.lang.includes('en-IN') || v.lang.includes('India')
-        );
-        if (preferredVoice) {
-          utterance.voice = preferredVoice;
-        }
-
-        utterance.onend = () => {
+        audio.onended = () => {
           this.isSpeaking = false;
+          this.currentAudio = null;
           this.notifyEnd();
           resolve();
         };
 
-        utterance.onerror = () => {
+        audio.onerror = (e) => {
+          console.warn('Sarvam HTMLAudio playback error', e);
           this.isSpeaking = false;
+          this.currentAudio = null;
           this.notifyEnd();
           resolve();
         };
 
-        window.speechSynthesis.speak(utterance);
+        audio.play().catch((err) => {
+          console.warn('Audio play was interrupted or blocked', err);
+          this.isSpeaking = false;
+          this.currentAudio = null;
+          this.notifyEnd();
+          resolve();
+        });
       });
-    } else {
+    } catch (err) {
+      console.warn('Audio initialization failed', err);
       this.isSpeaking = false;
       this.notifyEnd();
     }
@@ -160,4 +137,3 @@ class TTSService {
 }
 
 export const tts = new TTSService();
-

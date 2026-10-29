@@ -9,6 +9,7 @@ export interface UseVoiceCallOptions {
   formSchema: FormSchema | null;
   sessionId: string | null;
   locale?: 'en-IN' | 'hi-IN';
+  currentValues?: Record<string, any>;
   enableBargeIn?: boolean;
   onValuesExtracted?: (newValues: Record<string, string | number | null>) => void;
   onFieldHighlighted?: (fieldId: string) => void;
@@ -18,6 +19,7 @@ export function useVoiceCall({
   formSchema,
   sessionId,
   locale = 'en-IN',
+  currentValues,
   enableBargeIn = true,
   onValuesExtracted,
   onFieldHighlighted,
@@ -36,9 +38,12 @@ export function useVoiceCall({
   const isBargeInActiveRef = useRef(false);
   const isProcessingTurnRef = useRef(false);
 
-  // We keep a ref to sessionId and values so callbacks don't capture stale closures
+  // We keep a ref to sessionId, values, and formSchema so callbacks don't capture stale closures
   const sessionIdRef = useRef<string | null>(sessionId);
   sessionIdRef.current = sessionId;
+
+  const currentValuesRef = useRef<Record<string, any>>(currentValues || {});
+  currentValuesRef.current = currentValues || {};
 
   const localeRef = useRef<'en-IN' | 'hi-IN'>(locale);
   localeRef.current = locale;
@@ -62,12 +67,15 @@ export function useVoiceCall({
     [enableBargeIn, orbState]
   );
 
-  // When silence is detected during user speaking, automatically submit turn!
+  // Reference to current submit turn function to avoid closure staleness
+  const submitTurnRef = useRef<() => Promise<void>>(async () => {});
+
+  // When silence is detected after user speaking, automatically submit the speech turn!
   const handleSilenceDetected = useCallback(() => {
-    if (orbState === 'listening' && !isProcessingTurnRef.current) {
-      submitCurrentSpeechTurn();
+    if (!isProcessingTurnRef.current) {
+      submitTurnRef.current();
     }
-  }, [orbState]);
+  }, []);
 
   const {
     isRecording,
@@ -77,8 +85,8 @@ export function useVoiceCall({
   } = useMediaRecorder({
     onAudioData: handleAudioData,
     onSilenceDetected: handleSilenceDetected,
-    silenceThresholdMs: 1600,
-    energyThreshold: 24,
+    silenceThresholdMs: 1350, // Auto-submit when user pauses for 1.35s
+    energyThreshold: 14,      // Responsive to natural speaking volume
   });
 
   // Execute one conversational turn by sending recorded audio blob or text to backend
@@ -95,6 +103,7 @@ export function useVoiceCall({
           audioBlob: audioBlob || undefined,
           transcript: textTranscript,
           locale: localeRef.current,
+          currentValues: currentValuesRef.current,
         });
 
         if (turnResponse.user_transcript) {
@@ -165,7 +174,13 @@ export function useVoiceCall({
             : "I heard you. Please continue with your details or tap any field to edit.";
         setAssistantMessage(fallbackMsg);
         setOrbState('speaking');
-        await tts.speak(fallbackMsg, null, localeRef.current);
+        let fallbackAudio: string | null = null;
+        try {
+          fallbackAudio = await api.synthesizeTTS(fallbackMsg, localeRef.current);
+        } catch {
+          // ignore
+        }
+        await tts.speak(fallbackMsg, fallbackAudio, localeRef.current);
         if (isCallActive) {
           setOrbState('listening');
           await startRecording();
@@ -177,17 +192,22 @@ export function useVoiceCall({
     [isCallActive, onFieldHighlighted, onValuesExtracted, startRecording]
   );
 
-  // Submit current speech turn manually or via VAD
+  // Submit current speech turn manually or via automated VAD
   const submitCurrentSpeechTurn = useCallback(async () => {
-    if (!isRecording) return;
+    if (isProcessingTurnRef.current) return;
     const blob = await stopRecording();
-    if (blob) {
+    // Verify audio chunk contains spoken content
+    if (blob && blob.size > 1500) {
       await executeTurn(blob);
     } else {
-      setOrbState('listening');
-      await startRecording();
+      if (isCallActive) {
+        setOrbState('listening');
+        await startRecording();
+      }
     }
-  }, [executeTurn, isRecording, startRecording, stopRecording]);
+  }, [executeTurn, isCallActive, startRecording, stopRecording]);
+
+  submitTurnRef.current = submitCurrentSpeechTurn;
 
   // Barge-in interruption trigger (user clicks [✋ Tap to Interrupt])
   const interruptAssistant = useCallback(async () => {
@@ -209,21 +229,58 @@ export function useVoiceCall({
       setCallDurationSeconds(Math.floor((Date.now() - callStartTimeRef.current) / 1000));
     }, 1000);
 
-    // Initial greeting
+    // Context-aware background form inspection on click
     const isHindi = localeRef.current === 'hi-IN';
-    const formTitle = formSchemaRef.current?.title || 'FormSaathi';
-    const initialGreeting = isHindi
-      ? `नमस्ते! मैं आपका फॉर्म साथी हूँ। आइए ${formTitle} भरते हैं। कृपया अपना पूरा नाम बताइए।`
-      : `Hello! I am your FormSaathi assistant for ${formTitle}. Let's get started. What is your full name?`;
+    const formTitle = formSchemaRef.current?.title || (isHindi ? 'फॉर्म' : 'Form');
+    const fields = formSchemaRef.current?.fields || [];
+    const curVals = currentValuesRef.current || {};
+
+    // Check which fields are already filled (manually written or stored)
+    const filledFields = fields.filter((f) => {
+      const v = curVals[f.id];
+      return v !== null && v !== undefined && String(v).trim() !== '';
+    });
+    const filledFieldNames = filledFields.map((f) => f.label || f.id);
+
+    // Find the next missing field in logical order
+    const unfilledRequired = fields.filter(
+      (f) => f.required && (curVals[f.id] === null || curVals[f.id] === undefined || String(curVals[f.id]).trim() === '')
+    );
+    const nextField =
+      unfilledRequired.length > 0
+        ? unfilledRequired[0]
+        : fields.find((f) => curVals[f.id] === null || curVals[f.id] === undefined || String(curVals[f.id]).trim() === '');
+    const nextFieldLabel = nextField ? (nextField.label || nextField.id) : (isHindi ? 'विवरण' : 'details');
+
+    let initialGreeting = '';
+    if (filledFields.length > 0) {
+      initialGreeting = isHindi
+        ? `नमस्ते! मैं आपका फॉर्म साथी हूँ। मैं देख सकता हूँ कि आप ${formTitle} भर रहे हैं। आपने अपना ${filledFieldNames.join(', ')} पहले ही भर लिया है। तो आइए बाकी का फॉर्म भरते हैं! फॉर्म में अब आपका ${nextFieldLabel} पूछा गया है, तो कृपया वह बताइए।`
+        : `Hello! I am FormSaathi, and I can see you are filling the ${formTitle}. You have already filled your ${filledFieldNames.join(', ')}. So let's continue filling it! The form asks for your ${nextFieldLabel} next, so please share it whenever you are ready.`;
+    } else {
+      initialGreeting = isHindi
+        ? `नमस्ते! मैं आपका फॉर्म साथी हूँ, और मैं देख सकता हूँ कि आप ${formTitle} भर रहे हैं। आपने अभी तक कुछ नहीं भरा है, तो आइए इसे भरना शुरू करते हैं! फॉर्म में सबसे पहले आपका ${nextFieldLabel} पूछा गया है, तो कृपया बताइए।`
+        : `Hello! I am FormSaathi, and I can see you are filling the ${formTitle}. You haven't filled anything yet, so let's start filling it! The form asks for your ${nextFieldLabel} at first, so please share it whenever you are ready.`;
+    }
 
     setAssistantMessage(initialGreeting);
     setOrbState('speaking');
 
-    await tts.speak(initialGreeting, null, localeRef.current);
+    // Fetch realistic Sarvam Bulbul TTS audio from backend
+    let sarvamAudio: string | null = null;
+    try {
+      sarvamAudio = await api.synthesizeTTS(initialGreeting, localeRef.current);
+    } catch (err) {
+      console.warn('Sarvam TTS unavailable for initial greeting, falling back to Web Speech', err);
+    }
+
+    await tts.speak(initialGreeting, sarvamAudio, localeRef.current);
 
     // Immediately start listening after greeting
-    setOrbState('listening');
-    await startRecording();
+    if (callTimerRef.current) {
+      setOrbState('listening');
+      await startRecording();
+    }
   }, [startRecording]);
 
   // End voice call

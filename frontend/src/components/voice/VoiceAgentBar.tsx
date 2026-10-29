@@ -181,8 +181,11 @@ export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
         <div className="fs-widget-status-badge" style={{ color: orbColor }}>
           <span className="fs-state-dot" style={{ backgroundColor: orbColor }} />
           <span className="fs-status-label">
-            {orbState === 'listening' && (isHindi ? 'सुन रहा हूँ... बोलिए' : 'Listening... speak now')}
-            {orbState === 'thinking' && (isHindi ? 'समझ रहा हूँ...' : 'Extracting details...')}
+            {orbState === 'listening' &&
+              (volumeLevel > 14
+                ? (isHindi ? 'आपकी बात सुन रहा हूँ...' : 'Hearing you speak...')
+                : (isHindi ? 'सुन रहा हूँ... बोलिए' : 'Listening... speak now'))}
+            {orbState === 'thinking' && (isHindi ? 'समझ रहा हूँ...' : 'Processing your response...')}
             {orbState === 'speaking' && (isHindi ? 'बोल रहा हूँ...' : 'Speaking...')}
             {orbState === 'idle' && (isHindi ? 'तैयार' : 'Ready')}
           </span>
@@ -231,17 +234,17 @@ export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
           </button>
         )}
 
-        {/* Done speaking button when listening */}
+        {/* Automated VAD active: pauses automatically submit, or user can tap */}
         {orbState === 'listening' && (
           <button
             type="button"
             className="fs-control-btn fs-btn-done fs-widget-action-btn"
             onClick={onDoneSpeaking}
-            title="Done speaking, submit speech turn"
+            title="Auto-detects when you finish speaking, or tap to send immediately"
             aria-label="Done speaking"
           >
             <Check size={16} />
-            <span>{isHindi ? 'बोल चुका' : 'Done Speaking'}</span>
+            <span>{isHindi ? 'रुकें या टैप करें' : 'Done (or just pause)'}</span>
           </button>
         )}
 

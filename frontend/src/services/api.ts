@@ -169,6 +169,7 @@ class ApiService {
       filename?: string;
       transcript?: string;
       locale?: string;
+      currentValues?: Record<string, any>;
     }
   ): Promise<AssistantTurnResponse> {
     let res: Response;
@@ -182,6 +183,9 @@ class ApiService {
       if (payload.locale) {
         formData.append('locale', payload.locale);
       }
+      if (payload.currentValues) {
+        formData.append('current_values', JSON.stringify(payload.currentValues));
+      }
       res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/assistant`, {
         method: 'POST',
         body: formData,
@@ -190,7 +194,10 @@ class ApiService {
       res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/assistant`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: payload.transcript || '' }),
+        body: JSON.stringify({
+          transcript: payload.transcript || '',
+          current_values: payload.currentValues,
+        }),
       });
     }
 
@@ -199,6 +206,21 @@ class ApiService {
       throw new ApiError(err?.error?.message || `Assistant error (HTTP ${res.status})`, res.status, err?.error?.code, err);
     }
     return await res.json();
+  }
+
+  async synthesizeTTS(text: string, locale: 'en-IN' | 'hi-IN' = 'en-IN'): Promise<string | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, locale }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.audio_base64 || null;
+    } catch {
+      return null;
+    }
   }
 }
 

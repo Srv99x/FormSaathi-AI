@@ -134,5 +134,13 @@ class AIService:
             "is_complete": turn_result["is_complete"],
         }
 
+    async def synthesize_speech(self, text: str, locale: str = "en-IN", speaker: str | None = None) -> str | None:
+        """Synthesize text into speech using Sarvam Bulbul TTS (WAV base64)."""
+        if not self.sarvam.is_configured or not text.strip():
+            return None
+        if speaker is None:
+            speaker = "aditya" if locale == "hi-IN" else "priya"
+        return await self.sarvam.synthesize(text, language_code=locale, speaker=speaker)
+
 
 ai_service = AIService()

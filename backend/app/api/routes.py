@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Request, Response
 from app.ai import ai_service
 from app.models.contracts import (ConfirmRequest, ConfirmationResponse, CreateSession,
@@ -129,6 +130,7 @@ async def assistant_turn(sid: str, request: Request):
         audio_bytes = None
         filename = None
         transcript = None
+        current_values_override = None
         if "multipart/form-data" in content_type:
             form_data = await request.form()
             audio_file = form_data.get("audio")
@@ -136,19 +138,48 @@ async def assistant_turn(sid: str, request: Request):
                 audio_bytes = await audio_file.read()
                 filename = getattr(audio_file, "filename", "audio.webm")
             transcript = form_data.get("transcript")
+            raw_cv = form_data.get("current_values")
+            if raw_cv:
+                try:
+                    current_values_override = json.loads(str(raw_cv))
+                except Exception:
+                    pass
         else:
             try:
                 body = await request.json()
                 transcript = body.get("transcript")
+                current_values_override = body.get("current_values")
             except Exception:
                 transcript = None
 
+        # Merge client's current screen values with session values for full context
+        effective_values = dict(session.values)
+        if isinstance(current_values_override, dict):
+            for k, v in current_values_override.items():
+                if v is not None and str(v).strip() != "":
+                    effective_values[k] = v
+
         return await ai_service.conversational_turn(
             form_id=session.form_id,
-            current_values=session.values,
+            current_values=effective_values,
             locale=session.locale,
             audio_bytes=audio_bytes,
             filename=filename,
             transcript=transcript,
             manual_fields=session.manual_fields,
         )
+
+
+@router.post("/tts")
+async def tts_synthesize(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    text = body.get("text", "")
+    locale = body.get("locale", "en-IN")
+    speaker = body.get("speaker")
+    if not text or not str(text).strip():
+        raise APIError(422, "MISSING_TEXT", "Text is required for speech synthesis.")
+    audio_base64 = await ai_service.synthesize_speech(text=str(text), locale=locale, speaker=speaker)
+    return {"audio_base64": audio_base64}
