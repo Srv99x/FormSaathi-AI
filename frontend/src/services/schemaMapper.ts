@@ -244,10 +244,11 @@ export const BUILTIN_STUDENT_ASSISTANCE: FormSchema = {
 };
 
 const LOCAL_STORAGE_PREFIX = 'formsaathi_custom_form_';
+export const ACTIVE_DRAFT_KEY = 'active_draft';
 
-export function getCustomForm(formId: string): FormSchema | null {
+export function getCustomForm(storageKeyOrId: string): FormSchema | null {
   try {
-    const raw = localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${formId}`);
+    const raw = localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${storageKeyOrId}`);
     if (raw) {
       return JSON.parse(raw);
     }
@@ -257,12 +258,21 @@ export function getCustomForm(formId: string): FormSchema | null {
   return null;
 }
 
-export function saveCustomForm(form: FormSchema): void {
+export function saveCustomForm(form: FormSchema, storageKey?: string): void {
   try {
-    localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${form.id}`, JSON.stringify(form));
+    const key = storageKey || form.id;
+    localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${key}`, JSON.stringify(form));
   } catch (err) {
     console.warn('Failed to save custom form to localStorage', err);
   }
+}
+
+export function saveDraftForm(form: FormSchema): void {
+  saveCustomForm(form, ACTIVE_DRAFT_KEY);
+}
+
+export function getDraftForm(): FormSchema | null {
+  return getCustomForm(ACTIVE_DRAFT_KEY);
 }
 
 /**

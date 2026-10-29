@@ -59,8 +59,8 @@ export const FormFillerPage: React.FC = () => {
       setFormSchema(resolved);
       setLocale(resolved.settings?.defaultLocale || 'en-IN');
 
-      // Initialize session on the backend
-      await initSession(formId, resolved.settings?.defaultLocale || 'en-IN');
+      // Initialize session (online backend with fallback to local verification)
+      await initSession(formId, resolved.settings?.defaultLocale || 'en-IN', resolved);
       setIsLoadingForm(false);
     }
 
@@ -122,7 +122,7 @@ export const FormFillerPage: React.FC = () => {
     const nextLocale = locale === 'en-IN' ? 'hi-IN' : 'en-IN';
     setLocale(nextLocale);
     if (session) {
-      initSession(formId, nextLocale);
+      initSession(formId, nextLocale, formSchema);
     }
   };
 
