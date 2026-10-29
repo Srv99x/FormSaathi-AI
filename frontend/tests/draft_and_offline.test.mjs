@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+const esbuild = require('esbuild');
 
-// Mock localStorage for headless Node environment
+// Mock localStorage for Node test environment
 class MockLocalStorage {
   constructor() {
     this.store = new Map();
@@ -28,41 +31,76 @@ class MockLocalStorage {
 
 globalThis.localStorage = new MockLocalStorage();
 
-// --- Task 1: Draft Persistence Tests ---
+// Helper to bundle and import production TS modules directly into tests
+const cacheDir = path.resolve(__dirname, '../node_modules/.cache/test_bundle');
+if (!fs.existsSync(cacheDir)) {
+  fs.mkdirSync(cacheDir, { recursive: true });
+}
 
-test('Task 1 — Schema mapper provides separated storage key for active draft while preserving form.id', () => {
-  const LOCAL_STORAGE_PREFIX = 'formsaathi_custom_form_';
-  const ACTIVE_DRAFT_KEY = 'active_draft';
+async function loadProductionModule(srcRelPath) {
+  const fullPath = path.resolve(__dirname, '../src', srcRelPath);
+  const outFileName = srcRelPath.replace(/[\/\\]/g, '_').replace(/\.tsx?$/, '') + '.mjs';
+  const outPath = path.join(cacheDir, outFileName);
 
-  // Test saveCustomForm logic
-  function saveCustomForm(form, storageKey) {
-    const key = storageKey || form.id;
-    globalThis.localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${key}`, JSON.stringify(form));
-  }
+  esbuild.buildSync({
+    entryPoints: [fullPath],
+    bundle: true,
+    outfile: outPath,
+    format: 'esm',
+    packages: 'external',
+  });
 
-  function getCustomForm(storageKeyOrId) {
-    const raw = globalThis.localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${storageKeyOrId}`);
-    return raw ? JSON.parse(raw) : null;
-  }
+  const fileUrl = 'file:///' + outPath.replace(/\\/g, '/');
+  return await import(fileUrl);
+}
+
+// Pre-load production modules
+const schemaMapper = await loadProductionModule('services/schemaMapper.ts');
+const sessionHook = await loadProductionModule('hooks/useFormSession.ts');
+const apiModule = await loadProductionModule('services/api.ts');
+
+const {
+  saveCustomForm,
+  getCustomForm,
+  saveDraftForm,
+  getDraftForm,
+  ACTIVE_DRAFT_KEY,
+  BUILTIN_STUDENT_REGISTRATION,
+  BUILTIN_STUDENT_ASSISTANCE,
+} = schemaMapper;
+
+const {
+  checkDate,
+  computeLocalValidation,
+  executeConfirmation,
+} = sessionHook;
+
+const {
+  ApiError,
+} = apiModule;
+
+// ============================================================================
+// PART 1: Task 1 Draft Persistence Tests (Exercising Production Functions Directly)
+// ============================================================================
+
+test('Task 1 — Production schemaMapper provides separated storage key for active draft while preserving form.id', () => {
+  globalThis.localStorage.clear();
 
   const sampleForm = {
-    id: 'student_registration_v1',
+    ...BUILTIN_STUDENT_REGISTRATION,
     title: 'Edited Student Registration',
     description: 'Updated description by user',
-    fields: [
-      { id: 'full_name', label: 'Full Name', type: 'text', required: true },
-      { id: 'mobile', label: 'Mobile Number', type: 'tel', required: true }
-    ]
   };
 
-  // 1. Save draft using intended key 'active_draft'
-  saveCustomForm(sampleForm, ACTIVE_DRAFT_KEY);
+  // 1. Save draft using production saveDraftForm / saveCustomForm
+  saveDraftForm(sampleForm);
 
   // Raw key in localStorage must be 'formsaathi_custom_form_active_draft'
-  assert.ok(globalThis.localStorage.getItem('formsaathi_custom_form_active_draft') !== null);
+  const rawKey = `formsaathi_custom_form_${ACTIVE_DRAFT_KEY}`;
+  assert.ok(globalThis.localStorage.getItem(rawKey) !== null);
 
   // 2. Loading draft returns exact modified state
-  const loadedDraft = getCustomForm(ACTIVE_DRAFT_KEY);
+  const loadedDraft = getDraftForm();
   assert.ok(loadedDraft !== null);
   assert.equal(loadedDraft.title, 'Edited Student Registration');
   assert.equal(loadedDraft.description, 'Updated description by user');
@@ -72,66 +110,41 @@ test('Task 1 — Schema mapper provides separated storage key for active draft w
 });
 
 test('Task 1 — Changes survive simulated browser refresh and preserve original form ID', () => {
-  const LOCAL_STORAGE_PREFIX = 'formsaathi_custom_form_';
-  const ACTIVE_DRAFT_KEY = 'active_draft';
+  globalThis.localStorage.clear();
 
-  function saveCustomForm(form, storageKey) {
-    const key = storageKey || form.id;
-    globalThis.localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${key}`, JSON.stringify(form));
-  }
-  function getCustomForm(storageKeyOrId) {
-    const raw = globalThis.localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${storageKeyOrId}`);
-    return raw ? JSON.parse(raw) : null;
-  }
-
-  // User starts with student_assistance_v1 and edits a field
   const assistanceForm = {
-    id: 'student_assistance_v1',
-    title: 'Custom Student Assistance',
-    fields: [
-      { id: 'full_name', label: 'Applicant Name', type: 'text', required: true },
-      { id: 'grant_amount', label: 'Requested Amount', type: 'integer', required: true }
-    ]
+    ...BUILTIN_STUDENT_ASSISTANCE,
+    title: 'Custom Student Assistance Title',
   };
 
-  // Save as active draft
+  // Save active draft
   saveCustomForm(assistanceForm, ACTIVE_DRAFT_KEY);
 
-  // Simulate browser refresh: in-memory state is wiped, component re-mounts and reads getCustomForm('active_draft')
-  const restoredForm = getCustomForm('active_draft');
+  // Simulate browser refresh: read from storage
+  const restoredForm = getCustomForm(ACTIVE_DRAFT_KEY);
   assert.ok(restoredForm !== null);
   assert.equal(restoredForm.id, 'student_assistance_v1');
-  assert.equal(restoredForm.title, 'Custom Student Assistance');
-  assert.equal(restoredForm.fields.length, 2);
-  assert.equal(restoredForm.fields[1].id, 'grant_amount');
+  assert.equal(restoredForm.title, 'Custom Student Assistance Title');
+  assert.equal(restoredForm.fields.length, BUILTIN_STUDENT_ASSISTANCE.fields.length);
 });
 
 test('Task 1 — Template switching and publishing use correct form IDs', () => {
-  const LOCAL_STORAGE_PREFIX = 'formsaathi_custom_form_';
-
-  function saveCustomForm(form, storageKey) {
-    const key = storageKey || form.id;
-    globalThis.localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${key}`, JSON.stringify(form));
-  }
-  function getCustomForm(storageKeyOrId) {
-    const raw = globalThis.localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${storageKeyOrId}`);
-    return raw ? JSON.parse(raw) : null;
-  }
+  globalThis.localStorage.clear();
 
   const templates = [
-    { id: 'student_registration_v1', title: 'Student Registration Form' },
-    { id: 'student_assistance_v1', title: 'Student Assistance Application' },
-    { id: 'form_custom_9999', title: 'Blank Custom Form' }
+    BUILTIN_STUDENT_REGISTRATION,
+    BUILTIN_STUDENT_ASSISTANCE,
+    { id: 'form_custom_9999', title: 'Blank Custom Form', fields: [] },
   ];
 
   for (const tpl of templates) {
     // Switch template -> auto-saved to active_draft
-    saveCustomForm(tpl, 'active_draft');
-    if (tpl.id !== 'active_draft') {
+    saveCustomForm(tpl, ACTIVE_DRAFT_KEY);
+    if (tpl.id !== ACTIVE_DRAFT_KEY) {
       saveCustomForm(tpl, tpl.id);
     }
 
-    const currentDraft = getCustomForm('active_draft');
+    const currentDraft = getCustomForm(ACTIVE_DRAFT_KEY);
     assert.equal(currentDraft.id, tpl.id);
 
     // Publishing URL uses form.id, not 'active_draft'
@@ -140,249 +153,500 @@ test('Task 1 — Template switching and publishing use correct form IDs', () => 
   }
 });
 
-test('Task 1 — FormBuilderPage.tsx source code binds draft auto-save to "active_draft" key', () => {
-  const builderPath = path.resolve(__dirname, '../src/pages/FormBuilderPage.tsx');
-  const content = fs.readFileSync(builderPath, 'utf8');
+// ============================================================================
+// PART 2: Issue 1 — Mobile-number Validation Tests (Production computeLocalValidation)
+// ============================================================================
 
-  // Verify it reads from 'active_draft'
-  assert.ok(content.includes("getCustomForm('active_draft')"));
-
-  // Verify it saves to 'active_draft' without overwriting form.id
-  assert.ok(content.includes("saveCustomForm(form, 'active_draft')"));
-  assert.ok(!content.includes("saveCustomForm({ ...form, id: form.id })"));
-});
-
-// --- Task 2: Offline Confirmation & Validation Tests ---
-
-// Local validation helper mirroring computeLocalValidation
-function computeLocalValidation(schema, currentValues) {
-  const fieldStatuses = {};
-  const fieldMessages = {};
-  const missingFields = [];
-  const invalidFields = [];
-
-  for (const field of schema.fields) {
-    const rawVal = currentValues[field.id];
-    const hasValue = rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '';
-
-    if (!hasValue) {
-      if (field.required) {
-        fieldStatuses[field.id] = 'empty';
-        fieldMessages[field.id] = `${field.label} is required.`;
-        missingFields.push(field.id);
-      } else {
-        fieldStatuses[field.id] = 'empty';
-      }
-      continue;
-    }
-
-    const strVal = String(rawVal).trim();
-
-    if (field.type === 'integer' || field.id === 'year_of_study') {
-      const num = Number(rawVal);
-      if (isNaN(num) || !Number.isInteger(num)) {
-        fieldStatuses[field.id] = 'invalid';
-        invalidFields.push(field.id);
-        continue;
-      }
-      if (field.minimum !== undefined && num < field.minimum) {
-        fieldStatuses[field.id] = 'invalid';
-        invalidFields.push(field.id);
-        continue;
-      }
-      if (field.maximum !== undefined && num > field.maximum) {
-        fieldStatuses[field.id] = 'invalid';
-        invalidFields.push(field.id);
-        continue;
-      }
-    }
-
-    if (field.type === 'tel' || field.id === 'mobile') {
-      const digits = strVal.replace(/[\s\-+]/g, '').replace(/^91/, '');
-      if (!/^[6-9]\d{9}$/.test(digits)) {
-        fieldStatuses[field.id] = 'invalid';
-        invalidFields.push(field.id);
-        continue;
-      }
-    }
-
-    if (field.type === 'email' || field.id === 'email') {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(strVal) || strVal.length > 254) {
-        fieldStatuses[field.id] = 'invalid';
-        invalidFields.push(field.id);
-        continue;
-      }
-    }
-
-    if (field.minLength && strVal.length < field.minLength) {
-      fieldStatuses[field.id] = 'invalid';
-      invalidFields.push(field.id);
-      continue;
-    }
-
-    if (field.maxLength && strVal.length > field.maxLength) {
-      fieldStatuses[field.id] = 'invalid';
-      invalidFields.push(field.id);
-      continue;
-    }
-
-    fieldStatuses[field.id] = 'valid';
-  }
-
-  const canConfirm = missingFields.length === 0 && invalidFields.length === 0;
-  return { fieldStatuses, fieldMessages, missingFields, invalidFields, canConfirm };
-}
-
-test('Task 2 — Local session with all required fields complete enables confirmation', () => {
-  const registrationSchema = {
-    id: 'student_registration_v1',
-    fields: [
-      { id: 'full_name', label: 'Full Name', type: 'text', required: true, minLength: 2 },
-      { id: 'date_of_birth', label: 'Date of Birth', type: 'date', required: true },
-      { id: 'mobile', label: 'Mobile Number', type: 'tel', required: true },
-      { id: 'city', label: 'City', type: 'text', required: true },
-      { id: 'state', label: 'State', type: 'select', required: true, options: ['Assam', 'Manipur'] },
-      { id: 'programme', label: 'Programme', type: 'select', required: true, options: ['BSc Physics', 'BCA'] },
-      { id: 'email', label: 'Email', type: 'email', required: false }
-    ]
+test('Issue 1 — Mobile: Valid 10-digit number beginning with "91" is accepted', () => {
+  const schema = {
+    id: 'test_mobile_form',
+    fields: [{ id: 'mobile', label: 'Mobile Number', type: 'tel', required: true }],
   };
 
-  const completeValues = {
-    full_name: 'Priyanka Borah',
+  // A 10-digit number starting with 91 (e.g. 9123456789)
+  const res = computeLocalValidation(schema, { mobile: '9123456789' });
+  assert.equal(res.canConfirm, true);
+  assert.equal(res.invalidFields.length, 0);
+  assert.equal(res.fieldStatuses.mobile, 'valid');
+});
+
+test('Issue 1 — Mobile: Valid 10-digit numbers beginning with other allowed digits (6, 7, 8, 9) are accepted', () => {
+  const schema = {
+    id: 'test_mobile_form',
+    fields: [{ id: 'mobile', label: 'Mobile Number', type: 'tel', required: true }],
+  };
+
+  const validNumbers = [
+    '9876543210',
+    '8765432109',
+    '7012345678',
+    '6987654321',
+  ];
+
+  for (const num of validNumbers) {
+    const res = computeLocalValidation(schema, { mobile: num });
+    assert.equal(res.canConfirm, true, `Number ${num} should be valid`);
+    assert.equal(res.fieldStatuses.mobile, 'valid');
+  }
+});
+
+test('Issue 1 — Mobile: Valid numbers with explicit "+91" prefix (with or without spaces/hyphens) are accepted', () => {
+  const schema = {
+    id: 'test_mobile_form',
+    fields: [{ id: 'mobile', label: 'Mobile Number', type: 'tel', required: true }],
+  };
+
+  const prefixedNumbers = [
+    '+91 9123456789', // +91 followed by number starting with 91
+    '+919876543210',
+    '+91-8765432109',
+    '+91 (7012345678)',
+  ];
+
+  for (const num of prefixedNumbers) {
+    const res = computeLocalValidation(schema, { mobile: num });
+    assert.equal(res.canConfirm, true, `Prefixed number ${num} should be valid`);
+    assert.equal(res.fieldStatuses.mobile, 'valid');
+  }
+});
+
+test('Issue 1 — Mobile: Invalid length and invalid starting digits are rejected', () => {
+  const schema = {
+    id: 'test_mobile_form',
+    fields: [{ id: 'mobile', label: 'Mobile Number', type: 'tel', required: true }],
+  };
+
+  const invalidNumbers = [
+    '987654321',      // 9 digits (too short)
+    '987654321012',   // 12 digits without prefix (too long)
+    '1234567890',     // 10 digits starting with 1 (invalid start digit)
+    '5987654321',     // 10 digits starting with 5 (invalid start digit)
+    '+91 1234567890', // +91 prefix with invalid starting digit
+    'abcdefghij',     // letters
+  ];
+
+  for (const num of invalidNumbers) {
+    const res = computeLocalValidation(schema, { mobile: num });
+    assert.equal(res.canConfirm, false, `Number ${num} should be rejected`);
+    assert.ok(res.invalidFields.includes('mobile'));
+    assert.equal(res.fieldStatuses.mobile, 'invalid');
+    assert.equal(res.fieldMessages.mobile, 'Enter a valid 10-digit Indian mobile number beginning with 6–9.');
+  }
+});
+
+// ============================================================================
+// PART 3: Issue 2 — Date Validation Tests (Production checkDate and computeLocalValidation)
+// ============================================================================
+
+test('Issue 2 — Date: Valid ISO date and valid English named-month date are accepted', () => {
+  const fixedToday = new Date('2026-10-29T12:00:00Z');
+
+  // Valid ISO
+  const isoRes = checkDate('2002-05-14', fixedToday, true);
+  assert.equal(isoRes.status, 'valid');
+  assert.equal(isoRes.parsed, '2002-05-14');
+  assert.equal(isoRes.message, 'Valid date of birth.');
+
+  // Valid English named month
+  const namedRes = checkDate('3 April 2006', fixedToday, true);
+  assert.equal(namedRes.status, 'valid');
+  assert.equal(namedRes.parsed, '2006-04-03');
+});
+
+test('Issue 2 — Date: Malformed date strings are rejected', () => {
+  const fixedToday = new Date('2026-10-29T12:00:00Z');
+  const malformedInputs = ['not-a-date', '2002-99-99', '2002/13/45', 'invalid'];
+
+  for (const input of malformedInputs) {
+    const res = checkDate(input, fixedToday, true);
+    assert.equal(res.status, 'invalid', `Input "${input}" should be invalid`);
+    assert.equal(res.message, 'Enter a real date as YYYY-MM-DD or 3 April 2006.');
+  }
+});
+
+test('Issue 2 — Date: Impossible calendar dates (such as 2001-02-30 or 2023-02-29) are strictly rejected without silent rollover', () => {
+  const fixedToday = new Date('2026-10-29T12:00:00Z');
+
+  // 1. Feb 30 in any year does not exist
+  const feb30 = checkDate('2001-02-30', fixedToday, true);
+  assert.equal(feb30.status, 'invalid');
+  assert.equal(feb30.message, 'Enter a real date as YYYY-MM-DD or 3 April 2006.');
+
+  // 2. Feb 29 in a non-leap year (2023) does not exist
+  const feb29NonLeap = checkDate('2023-02-29', fixedToday, true);
+  assert.equal(feb29NonLeap.status, 'invalid');
+
+  // 3. Feb 29 in a leap year (2024) DOES exist
+  const feb29Leap = checkDate('2004-02-29', fixedToday, true);
+  assert.equal(feb29Leap.status, 'valid');
+
+  // 4. April 31 does not exist (April has 30 days)
+  const apr31 = checkDate('2002-04-31', fixedToday, true);
+  assert.equal(apr31.status, 'invalid');
+});
+
+test('Issue 2 — Date: Future dates of birth are rejected', () => {
+  const fixedToday = new Date('2026-10-29T12:00:00Z');
+
+  const future1 = checkDate('2099-01-01', fixedToday, true);
+  assert.equal(future1.status, 'invalid');
+  assert.equal(future1.message, 'Date of birth cannot be in the future.');
+
+  const tomorrow = checkDate('2026-10-30', fixedToday, true);
+  assert.equal(tomorrow.status, 'invalid');
+  assert.equal(tomorrow.message, 'Date of birth cannot be in the future.');
+});
+
+test('Issue 2 — Date: Supported age boundaries (12 to 100) and outlier semantics per backend contract', () => {
+  const fixedToday = new Date('2026-10-29T12:00:00Z');
+
+  // Exact lower boundary: exactly 12 years old today (born 2014-10-29)
+  const age12 = checkDate('2014-10-29', fixedToday, true);
+  assert.equal(age12.status, 'valid');
+
+  // Exact upper boundary: exactly 100 years old today (born 1926-10-29)
+  const age100 = checkDate('1926-10-29', fixedToday, true);
+  assert.equal(age100.status, 'valid');
+
+  // Typical college student age: 20 years old
+  const age20 = checkDate('2006-10-29', fixedToday, true);
+  assert.equal(age20.status, 'valid');
+
+  // Outlier age (< 12):
+  // When entered in slash format, slash is never an explicit acknowledgement -> needs_review per CONTRACT.md
+  const slashOutlier = checkDate('01/01/2020', fixedToday, true);
+  assert.equal(slashOutlier.status, 'needs_review');
+  assert.equal(slashOutlier.message, 'Age is outside 12–100. Please explicitly check and enter the date.');
+
+  // When manually entered in explicit ISO format, age outlier is acknowledged per backend validators.py
+  const manualIsoOutlier = checkDate('2020-01-01', fixedToday, true);
+  assert.equal(manualIsoOutlier.status, 'valid');
+  assert.equal(manualIsoOutlier.message, 'Date explicitly checked; age is outside the typical student range.');
+});
+
+test('Issue 2 — Offline validation rejects form confirmation when date is impossible or needs review', () => {
+  const schema = {
+    id: 'test_date_form',
+    fields: [
+      { id: 'full_name', label: 'Full Name', type: 'text', required: true },
+      { id: 'date_of_birth', label: 'Date of Birth', type: 'date', required: true },
+    ],
+  };
+
+  // Impossible date
+  const resImpossible = computeLocalValidation(schema, {
+    full_name: 'Amit Sharma',
+    date_of_birth: '2001-02-30',
+  });
+  assert.equal(resImpossible.canConfirm, false);
+  assert.ok(resImpossible.invalidFields.includes('date_of_birth'));
+
+  // Ambiguous slash date
+  const resAmbiguous = computeLocalValidation(schema, {
+    full_name: 'Amit Sharma',
+    date_of_birth: '03/04/2006', // Could be March 4 or April 3 -> needs_review
+  });
+  assert.equal(resAmbiguous.canConfirm, false);
+  assert.ok(resAmbiguous.needsReviewFields.includes('date_of_birth'));
+});
+
+// ============================================================================
+// PART 4: Issue 3 — Online Confirmation Decision Path & Fallback Safety Tests
+// ============================================================================
+
+test('Issue 3 — Scenario 1: Backend review rejects confirmation (can_confirm: false) → NO local receipt produced', async () => {
+  const session = {
+    session_id: 'sess_live_123',
+    form_id: 'student_registration_v1',
+    revision: 3,
+    expires_in_seconds: 3600,
+  };
+
+  const values = {
+    full_name: 'Suman Roy',
     date_of_birth: '2002-05-14',
     mobile: '9864012345',
     city: 'Guwahati',
     state: 'Assam',
     programme: 'BCA',
-    email: 'priyanka@example.in'
   };
 
-  const validation = computeLocalValidation(registrationSchema, completeValues);
-  assert.equal(validation.canConfirm, true);
-  assert.equal(validation.missingFields.length, 0);
-  assert.equal(validation.invalidFields.length, 0);
-  assert.equal(validation.fieldStatuses.full_name, 'valid');
-  assert.equal(validation.fieldStatuses.mobile, 'valid');
+  // Mock API where backend review explicitly says can_confirm: false
+  const mockApiClient = {
+    getReview: async () => ({
+      values,
+      field_statuses: { mobile: 'conflict' },
+      messages: { mobile: 'Contradictory values detected' },
+      missing: [],
+      invalid: [],
+      conflicts: ['mobile'],
+      can_confirm: false,
+      revision: 3,
+    }),
+    confirmSession: async () => {
+      throw new Error('Should not be called when can_confirm is false');
+    },
+  };
+
+  let localReceiptEmitted = false;
+  await assert.rejects(
+    async () => {
+      await executeConfirmation({
+        session,
+        values,
+        schema: BUILTIN_STUDENT_REGISTRATION,
+        apiClient: mockApiClient,
+        onRecordConfirmed: () => {
+          localReceiptEmitted = true;
+        },
+      });
+    },
+    /backend review rejected confirmation/
+  );
+
+  assert.equal(localReceiptEmitted, false, 'No local receipt must be generated when backend review rejects confirmation');
 });
 
-test('Task 2 — Local session with required fields missing strictly disables confirmation', () => {
-  const registrationSchema = {
-    id: 'student_registration_v1',
-    fields: [
-      { id: 'full_name', label: 'Full Name', type: 'text', required: true },
-      { id: 'date_of_birth', label: 'Date of Birth', type: 'date', required: true },
-      { id: 'mobile', label: 'Mobile Number', type: 'tel', required: true },
-      { id: 'city', label: 'City', type: 'text', required: true },
-      { id: 'state', label: 'State', type: 'select', required: true },
-      { id: 'programme', label: 'Programme', type: 'select', required: true }
-    ]
-  };
-
-  // Missing mobile and programme
-  const partialValues = {
-    full_name: 'Rahul Sarma',
-    date_of_birth: '2001-08-20',
-    city: 'Jorhat',
-    state: 'Assam'
-  };
-
-  const validation = computeLocalValidation(registrationSchema, partialValues);
-  assert.equal(validation.canConfirm, false);
-  assert.ok(validation.missingFields.includes('mobile'));
-  assert.ok(validation.missingFields.includes('programme'));
-  assert.equal(validation.fieldStatuses.mobile, 'empty');
-});
-
-test('Task 2 — Local session with invalid field blocks confirmation even if all required fields are populated', () => {
-  const assistanceSchema = {
-    id: 'student_assistance_v1',
-    fields: [
-      { id: 'full_name', label: 'Full Name', type: 'text', required: true },
-      { id: 'date_of_birth', label: 'Date of Birth', type: 'date', required: true },
-      { id: 'mobile', label: 'Mobile Number', type: 'tel', required: true },
-      { id: 'institution', label: 'Institution', type: 'text', required: true },
-      { id: 'programme', label: 'Programme', type: 'text', required: true },
-      { id: 'year_of_study', label: 'Year of Study', type: 'integer', required: true, minimum: 1, maximum: 5 },
-      { id: 'city', label: 'City', type: 'text', required: true },
-      { id: 'state', label: 'State', type: 'text', required: true },
-      { id: 'assistance_type', label: 'Assistance Type', type: 'text', required: true },
-      { id: 'email', label: 'Email', type: 'email', required: false }
-    ]
-  };
-
-  // year_of_study is 8 (exceeds max 5) and mobile starts with 1
-  const invalidValues = {
-    full_name: 'Anup Kumar',
-    date_of_birth: '2003-01-15',
-    mobile: '1234567890', // invalid: must start with 6-9
-    institution: 'Cotton University',
-    programme: 'BSc Physics',
-    year_of_study: 8, // invalid: must be 1-5
-    city: 'Guwahati',
-    state: 'Assam',
-    assistance_type: 'books'
-  };
-
-  const validation = computeLocalValidation(assistanceSchema, invalidValues);
-  assert.equal(validation.canConfirm, false);
-  assert.ok(validation.invalidFields.includes('mobile'));
-  assert.ok(validation.invalidFields.includes('year_of_study'));
-  assert.equal(validation.fieldStatuses.year_of_study, 'invalid');
-  assert.equal(validation.fieldStatuses.mobile, 'invalid');
-});
-
-test('Task 2 — Offline confirmation produces only "confirmed_local" receipt without external submission claims', () => {
+test('Issue 3 — Scenario 2: Backend returns 409 STALE_REVIEW → NO local receipt produced', async () => {
   const session = {
-    session_id: `local-session-${Date.now()}`,
+    session_id: 'sess_live_123',
     form_id: 'student_registration_v1',
     revision: 2,
-    expires_in_seconds: 3600
+    expires_in_seconds: 3600,
   };
 
   const values = {
-    full_name: 'Bikash Kalita',
-    date_of_birth: '2000-11-20',
-    mobile: '9435012345',
-    city: 'Tezpur',
+    full_name: 'Suman Roy',
+    date_of_birth: '2002-05-14',
+    mobile: '9864012345',
+    city: 'Guwahati',
     state: 'Assam',
-    programme: 'BCA'
+    programme: 'BCA',
   };
 
-  // Generate confirmation record per CONTRACT.md
-  const localRec = {
-    confirmation_id: `FS-LOCAL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-    status: 'confirmed_local',
-    form_id: session.form_id,
-    revision: session.revision,
-    confirmed_at: new Date().toISOString(),
-    record: { ...values }
+  // Backend review allowed confirmation, but confirm call returned 409 STALE_REVIEW
+  const mockApiClient = {
+    getReview: async () => ({
+      values,
+      field_statuses: {},
+      messages: {},
+      missing: [],
+      invalid: [],
+      conflicts: [],
+      can_confirm: true,
+      revision: 2,
+    }),
+    confirmSession: async () => {
+      throw new ApiError('Review snapshot is stale (revision changed on server)', 409, 'STALE_REVIEW');
+    },
   };
 
-  assert.equal(localRec.status, 'confirmed_local');
-  assert.equal(localRec.form_id, 'student_registration_v1');
-  assert.ok(localRec.confirmation_id.startsWith('FS-LOCAL-'));
-  assert.equal(localRec.revision, 2);
-  assert.deepEqual(localRec.record, values);
-  // Guarantee it never claims external submission
-  assert.ok(!JSON.stringify(localRec).includes('external'));
-  assert.ok(!JSON.stringify(localRec).includes('remote'));
+  let localReceiptEmitted = false;
+  await assert.rejects(
+    async () => {
+      await executeConfirmation({
+        session,
+        values,
+        schema: BUILTIN_STUDENT_REGISTRATION,
+        apiClient: mockApiClient,
+        onRecordConfirmed: () => {
+          localReceiptEmitted = true;
+        },
+      });
+    },
+    (err) => err instanceof ApiError && err.status === 409
+  );
+
+  assert.equal(localReceiptEmitted, false, 'No local receipt must be generated on 409 STALE_REVIEW');
 });
 
-test('Task 2 — useFormSession hook implements maintainable local validation and confirmation path', () => {
-  const hookPath = path.resolve(__dirname, '../src/hooks/useFormSession.ts');
-  const content = fs.readFileSync(hookPath, 'utf8');
+test('Issue 3 — Scenario 3: Backend returns validation / client error (HTTP 4xx) → NO local receipt produced', async () => {
+  const session = {
+    session_id: 'sess_live_123',
+    form_id: 'student_registration_v1',
+    revision: 2,
+    expires_in_seconds: 3600,
+  };
 
-  // Verify computeLocalValidation is exported and defined
-  assert.ok(content.includes('export function computeLocalValidation'));
+  const values = {
+    full_name: 'Suman Roy',
+    date_of_birth: '2002-05-14',
+    mobile: '9864012345',
+    city: 'Guwahati',
+    state: 'Assam',
+    programme: 'BCA',
+  };
 
-  // Verify fallback session initializes local validation
-  assert.ok(content.includes('computeLocalValidation(activeSchema, initialVals)'));
+  // Server rejected confirm with 422 Unprocessable Entity
+  const mockApiClient = {
+    getReview: async () => ({
+      values,
+      field_statuses: {},
+      messages: {},
+      missing: [],
+      invalid: [],
+      conflicts: [],
+      can_confirm: true,
+      revision: 2,
+    }),
+    confirmSession: async () => {
+      throw new ApiError('Unprocessable payload rejected by server', 422, 'VALIDATION_ERROR');
+    },
+  };
 
-  // Verify local session updateField evaluates canConfirm
-  assert.ok(content.includes('const isLocalSession = session.session_id.startsWith(\'local-session-\')'));
-  assert.ok(content.includes('setCanConfirm(validation.canConfirm)'));
+  let localReceiptEmitted = false;
+  await assert.rejects(
+    async () => {
+      await executeConfirmation({
+        session,
+        values,
+        schema: BUILTIN_STUDENT_REGISTRATION,
+        apiClient: mockApiClient,
+        onRecordConfirmed: () => {
+          localReceiptEmitted = true;
+        },
+      });
+    },
+    (err) => err instanceof ApiError && err.status === 422
+  );
 
-  // Verify confirmLocal safeguards for local sessions
-  assert.ok(content.includes('if (!validation.canConfirm)'));
-  assert.ok(content.includes('Cannot confirm local session: required field(s) missing or invalid'));
+  assert.equal(localReceiptEmitted, false, 'No local receipt must be generated on 422 validation error');
+});
+
+test('Issue 3 — Scenario 4: Genuine network/backend unavailability with valid local data → local receipt is allowed', async () => {
+  const session = {
+    session_id: 'sess_live_123',
+    form_id: 'student_registration_v1',
+    revision: 1,
+    expires_in_seconds: 3600,
+  };
+
+  const validValues = {
+    full_name: 'Bikash Kalita',
+    date_of_birth: '2002-05-14',
+    mobile: '9123456789',
+    city: 'Tezpur',
+    state: 'Assam',
+    programme: 'BCA',
+  };
+
+  // Mock API throwing genuine network TypeError: Failed to fetch
+  const mockApiClient = {
+    getReview: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+    confirmSession: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+  };
+
+  let localReceiptEmitted = false;
+  const receipt = await executeConfirmation({
+    session,
+    values: validValues,
+    schema: BUILTIN_STUDENT_REGISTRATION,
+    apiClient: mockApiClient,
+    onRecordConfirmed: () => {
+      localReceiptEmitted = true;
+    },
+  });
+
+  assert.equal(localReceiptEmitted, true);
+  assert.equal(receipt.status, 'confirmed_local');
+  assert.equal(receipt.form_id, 'student_registration_v1');
+  assert.ok(receipt.confirmation_id.startsWith('FS-LOCAL-'));
+  assert.deepEqual(receipt.record, validValues);
+  // Guarantee receipt never claims external government or remote submission
+  assert.ok(!JSON.stringify(receipt).includes('external'));
+});
+
+test('Issue 3 — Scenario 5: Genuine network/backend unavailability with missing or invalid local data → confirmation is strictly rejected', async () => {
+  const session = {
+    session_id: 'sess_live_123',
+    form_id: 'student_registration_v1',
+    revision: 1,
+    expires_in_seconds: 3600,
+  };
+
+  // Missing mobile and state, invalid date
+  const invalidValues = {
+    full_name: 'Bikash Kalita',
+    date_of_birth: '2001-02-30', // impossible date
+    city: 'Tezpur',
+  };
+
+  const mockApiClient = {
+    getReview: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+    confirmSession: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+  };
+
+  let localReceiptEmitted = false;
+  await assert.rejects(
+    async () => {
+      await executeConfirmation({
+        session,
+        values: invalidValues,
+        schema: BUILTIN_STUDENT_REGISTRATION,
+        apiClient: mockApiClient,
+        onRecordConfirmed: () => {
+          localReceiptEmitted = true;
+        },
+      });
+    },
+    /network unavailable and local validation failed/
+  );
+
+  assert.equal(localReceiptEmitted, false, 'No local receipt must be generated when local validation fails');
+});
+
+test('Issue 3 — Local fallback session (local-session-*) confirms valid data and blocks invalid data', async () => {
+  const localSession = {
+    session_id: `local-session-${Date.now()}`,
+    form_id: 'student_registration_v1',
+    revision: 0,
+    expires_in_seconds: 3600,
+  };
+
+  const completeValues = {
+    full_name: 'Pranab Das',
+    date_of_birth: '2000-11-20',
+    mobile: '9864012345',
+    city: 'Nagaon',
+    state: 'Assam',
+    programme: 'BSc Physics',
+  };
+
+  const dummyApiClient = {
+    getReview: async () => { throw new Error('Must not be called'); },
+    confirmSession: async () => { throw new Error('Must not be called'); },
+  };
+
+  // Complete data -> succeeds with confirmed_local
+  const receipt = await executeConfirmation({
+    session: localSession,
+    values: completeValues,
+    schema: BUILTIN_STUDENT_REGISTRATION,
+    apiClient: dummyApiClient,
+  });
+
+  assert.equal(receipt.status, 'confirmed_local');
+  assert.ok(receipt.confirmation_id.startsWith('FS-LOCAL-'));
+  assert.equal(receipt.record.full_name, 'Pranab Das');
+
+  // Incomplete data -> rejected
+  await assert.rejects(
+    async () => {
+      await executeConfirmation({
+        session: localSession,
+        values: { full_name: 'Incomplete' },
+        schema: BUILTIN_STUDENT_REGISTRATION,
+        apiClient: dummyApiClient,
+      });
+    },
+    /Cannot confirm local session: required field\(s\) missing or invalid/
+  );
 });
