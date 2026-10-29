@@ -1,4 +1,12 @@
 import secrets
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -20,9 +28,12 @@ def error_response(status, code, message, field_id=None, retryable=False):
 def create_app(store: SessionStore | None = None) -> FastAPI:
     application = FastAPI(title="FormSaathi AI", version="0.1.0")
     application.state.sessions = store if store is not None else SessionStore()
-    application.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
-                               allow_methods=["GET", "POST", "PATCH", "DELETE"],
-                               allow_headers=["Content-Type"])
+    application.add_middleware(CORSMiddleware,
+                               allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
+                                              "http://localhost:8000", "http://127.0.0.1:8000",
+                                              "null"],
+                               allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+                               allow_headers=["*"])
 
     @application.exception_handler(APIError)
     async def api_error(request: Request, exc: APIError):
