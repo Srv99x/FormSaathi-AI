@@ -68,7 +68,7 @@ class SarvamClient:
             "request_id": request_id,
         }
 
-    async def synthesize(self, text: str, language_code: str = "hi-IN", speaker: str = "meera") -> str | None:
+    async def synthesize(self, text: str, language_code: str = "hi-IN", speaker: str = "priya") -> str | None:
         """
         Synthesizes text to speech using Sarvam Bulbul.
         Returns base64 encoded audio string (WAV) or None if not configured/failed.

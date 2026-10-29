@@ -16,7 +16,7 @@ def _load_env_file():
                     if line and not line.startswith("#") and "=" in line:
                         key, _, val = line.partition("=")
                         key, val = key.strip(), val.strip()
-                        if key and key not in os.environ:
+                        if key:
                             os.environ[key] = val
             except Exception:
                 pass
@@ -27,16 +27,35 @@ _load_env_file()
 
 
 class AIConfig:
-    # Sarvam AI
-    SARVAM_API_KEY: str = os.getenv("SARVAM_API_KEY", "")
-    SARVAM_ASR_MODEL: str = os.getenv("SARVAM_ASR_MODEL", "saaras:v4")
-    SARVAM_TTS_MODEL: str = os.getenv("SARVAM_TTS_MODEL", "bulbul:v1")
-    SARVAM_BASE_URL: str = os.getenv("SARVAM_BASE_URL", "https://api.sarvam.ai")
+    @property
+    def SARVAM_API_KEY(self) -> str:
+        _load_env_file()
+        return os.getenv("SARVAM_API_KEY", "")
 
-    # Groq LLM
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    GROQ_BASE_URL: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+    @property
+    def SARVAM_ASR_MODEL(self) -> str:
+        return os.getenv("SARVAM_ASR_MODEL", "saaras:v4")
+
+    @property
+    def SARVAM_TTS_MODEL(self) -> str:
+        return os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
+
+    @property
+    def SARVAM_BASE_URL(self) -> str:
+        return os.getenv("SARVAM_BASE_URL", "https://api.sarvam.ai")
+
+    @property
+    def GROQ_API_KEY(self) -> str:
+        _load_env_file()
+        return os.getenv("GROQ_API_KEY", "")
+
+    @property
+    def GROQ_MODEL(self) -> str:
+        return os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
+    @property
+    def GROQ_BASE_URL(self) -> str:
+        return os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
     # Constraints from docs/CONTRACT.md
     MAX_AUDIO_BYTES: int = int(os.getenv("MAX_AUDIO_MB", "10")) * 1024 * 1024
