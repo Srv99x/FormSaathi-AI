@@ -4,15 +4,17 @@ export interface UseMediaRecorderOptions {
   onAudioData?: (volume: number, frequencyData: Uint8Array) => void;
   onSilenceDetected?: () => void;
   silenceThresholdMs?: number;
-  energyThreshold?: number; // 0 to 255
+  energyThreshold?: number; // 0 to 255 (moderate threshold filters out ambient room/fan noise)
+  maxRecordingDurationMs?: number; // Failsafe safety cap to prevent indefinite listening
 }
 
 export function useMediaRecorder(options: UseMediaRecorderOptions = {}) {
   const {
     onAudioData,
     onSilenceDetected,
-    silenceThresholdMs = 1300,
-    energyThreshold = 14,
+    silenceThresholdMs = 1000,
+    energyThreshold = 25,
+    maxRecordingDurationMs = 5500,
   } = options;
 
   const [isRecording, setIsRecording] = useState(false);
@@ -34,6 +36,7 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}) {
   const chunksRef = useRef<Blob[]>([]);
   const silenceTimerRef = useRef<number | null>(null);
   const speechDetectedRef = useRef(false);
+  const speechStartTimeRef = useRef(0);
   const consecutiveSpeechFramesRef = useRef(0);
 
   const cleanupAudioNodes = useCallback(() => {
@@ -90,7 +93,7 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}) {
           if (!analyserRef.current) return;
           analyserRef.current.getByteFrequencyData(dataArray);
 
-          // Calculate RMS / average energy
+          // Calculate average energy
           let sum = 0;
           for (let i = 0; i < bufferLength; i++) {
             sum += dataArray[i];
@@ -103,21 +106,37 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}) {
           // Automated Speech Activity & Silence Detection (VAD)
           if (avg > energyThreshold) {
             consecutiveSpeechFramesRef.current += 1;
-            // Require ~60ms (3 frames) of sound to confirm speech rather than a pop
+            // Require ~60ms (3 frames) of speech energy to confirm human voice
             if (consecutiveSpeechFramesRef.current >= 3) {
-              speechDetectedRef.current = true;
+              if (!speechDetectedRef.current) {
+                speechDetectedRef.current = true;
+                speechStartTimeRef.current = Date.now();
+              }
             }
             if (silenceTimerRef.current) {
               window.clearTimeout(silenceTimerRef.current);
               silenceTimerRef.current = null;
             }
+
+            // Failsafe safety cap: If user or background has been active for maxRecordingDurationMs, finalize!
+            if (
+              speechDetectedRef.current &&
+              speechStartTimeRef.current &&
+              Date.now() - speechStartTimeRef.current > maxRecordingDurationMs
+            ) {
+              speechDetectedRef.current = false;
+              speechStartTimeRef.current = 0;
+              onSilenceDetectedRef.current?.();
+              return;
+            }
           } else {
             consecutiveSpeechFramesRef.current = 0;
-            // If user was actively speaking and then paused/stopped
+            // When user stops speaking, start silence countdown
             if (speechDetectedRef.current && !silenceTimerRef.current) {
               silenceTimerRef.current = window.setTimeout(() => {
                 if (speechDetectedRef.current) {
                   speechDetectedRef.current = false;
+                  speechStartTimeRef.current = 0;
                   if (silenceTimerRef.current) {
                     window.clearTimeout(silenceTimerRef.current);
                     silenceTimerRef.current = null;
@@ -136,22 +155,26 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}) {
         console.warn('Web Audio Analyser not available', err);
       }
     },
-    [energyThreshold, silenceThresholdMs]
+    [energyThreshold, silenceThresholdMs, maxRecordingDurationMs]
   );
 
   const startRecording = useCallback(async (): Promise<boolean> => {
-    try {
-      chunksRef.current = [];
-      speechDetectedRef.current = false;
+    chunksRef.current = [];
+    cleanupAudioNodes();
+    releaseStream();
+    speechDetectedRef.current = false;
+    speechStartTimeRef.current = 0;
+    consecutiveSpeechFramesRef.current = 0;
 
+    try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          channelCount: 1,
         },
       });
-
       streamRef.current = stream;
       setMicPermission('granted');
 
@@ -186,7 +209,7 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}) {
       setIsRecording(false);
       return false;
     }
-  }, [startMonitoring]);
+  }, [cleanupAudioNodes, releaseStream, startMonitoring]);
 
   const stopRecording = useCallback(async (): Promise<Blob | null> => {
     return new Promise((resolve) => {
@@ -235,4 +258,3 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}) {
     analyser: analyserRef.current,
   };
 }
-

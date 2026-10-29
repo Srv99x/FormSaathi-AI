@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Share2,
   Eye,
+  ArrowLeft,
 } from 'lucide-react';
 import { FormField, FormSchema, FormSettings } from '../types/form';
 import {
@@ -171,6 +172,15 @@ export const FormBuilderPage: React.FC = () => {
         </div>
 
         <div className="fs-subbar-right">
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<ArrowLeft size={15} />}
+            onClick={() => navigate('/')}
+            title="Return to active form"
+          >
+            Back to Form
+          </Button>
           <Button
             variant="outline"
             size="sm"

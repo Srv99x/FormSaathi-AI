@@ -92,8 +92,9 @@ export function useVoiceCall({
   } = useMediaRecorder({
     onAudioData: handleAudioData,
     onSilenceDetected: handleSilenceDetected,
-    silenceThresholdMs: 1350,
-    energyThreshold: 14,
+    silenceThresholdMs: 1000,
+    energyThreshold: 26,
+    maxRecordingDurationMs: 5500,
   });
 
   // Execute conversational turn

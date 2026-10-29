@@ -65,6 +65,64 @@ KNOWN_CITY_STATE_MAP = {
 }
 
 
+def detect_guardrail_violation(transcript: str, language_code: str = "en-IN") -> tuple[str | None, str | None]:
+    """
+    Checks user transcript against strict safety & persona guardrails:
+    1. Identity: When asked identity, vendor, or underlying AI model, returns strictly FormSaathi.
+    2. Injection: Refuses system prompt reveals or instruction overrides.
+    3. Out-of-Scope: Refuses general knowledge, coding, weather, or non-form inquiries.
+    """
+    if not transcript or not transcript.strip():
+        return None, None
+
+    t = transcript.strip().lower()
+
+    # 1. Identity Guardrail
+    identity_regex = (
+        r"(who\s+are\s+(you|u)|what\s+is\s+your\s+name|which\s+model|what\s+model|what\s+ai|which\s+ai|"
+        r"are\s+you\s+(chatgpt|llama|groq|claude|gemini|openai|sarvam|deepseek|mistral)|what\s+llm|"
+        r"who\s+(created|made|built|developed)\s+you|tum\s+kaun\s+ho|aap\s+kaun\s+hain|"
+        r"aapka\s+naam\s+kya\s+hai|tumhara\s+naam\s+kya\s+hai)"
+    )
+    if re.search(identity_regex, t):
+        msg = (
+            "नमस्ते! मैं फॉर्मसाथी हूँ, आपका आवाज़ फॉर्म सहायक।"
+            if language_code == "hi-IN"
+            else "I am FormSaathi, your voice form assistant."
+        )
+        return "IDENTITY", msg
+
+    # 2. Prompt Injection / Jailbreak Guardrail
+    injection_regex = (
+        r"(ignore\s+(all\s+)?(previous|prior)\s+instructions|system\s+prompt|what\s+are\s+your\s+instructions|"
+        r"reveal\s+instructions|jailbreak)"
+    )
+    if re.search(injection_regex, t):
+        msg = (
+            "माफ़ कीजिए, मैं इसमें आपकी सहायता नहीं कर सकता। मैं केवल यह फॉर्म भरने में आपकी सहायता कर सकता हूँ।"
+            if language_code == "hi-IN"
+            else "I am sorry, I can't help you with that. I can only assist you with filling this form."
+        )
+        return "OUT_OF_SCOPE", msg
+
+    # 3. Out of Scope / General Knowledge / Off-Topic Guardrail
+    off_topic_regex = (
+        r"(\b(write|create|generate|code)\s+(a\s+)?(python|javascript|java|c\+\+|code|script|program|essay|story|poem)\b|"
+        r"what\s+is\s+the\s+capital\s+of|\b(weather|temperature)\s+(today|in|outside|tomorrow)\b|"
+        r"tell\s+me\s+a\s+joke|who\s+is\s+the\s+prime\s+minister|who\s+is\s+the\s+president|"
+        r"how\s+to\s+cook|what\s+is\s+quantum|\bcalculate\s+\d|\bcricket\s+score\b|\bfootball\s+score\b)"
+    )
+    if re.search(off_topic_regex, t):
+        msg = (
+            "माफ़ कीजिए, मैं इसमें आपकी सहायता नहीं कर सकता। मैं केवल यह फॉर्म भरने में आपकी सहायता कर सकता हूँ।"
+            if language_code == "hi-IN"
+            else "I am sorry, I can't help you with that. I can only assist you with filling this form."
+        )
+        return "OUT_OF_SCOPE", msg
+
+    return None, None
+
+
 class GroqAgent:
     """Agent using Groq (Llama 3.3) for entity extraction and conversational voice guidance."""
 
@@ -124,6 +182,11 @@ class GroqAgent:
         """
         Extracts structured field values from transcript into Candidate objects conforming to CONTRACT.md.
         """
+        # Guardrail fast path: if user is asking identity or off-topic questions, extract no form fields.
+        guard_type, _ = detect_guardrail_violation(transcript, language_code)
+        if guard_type:
+            return ExtractionResponse(candidates=[], issues=[])
+
         properties = form_schema.get("properties", {})
         allowed_fields = list(properties.keys())
         required_fields = form_schema.get("required", [])
@@ -158,7 +221,9 @@ RULES:
    - For 'mobile': 10 ASCII digits starting with 6-9.
    - For 'year_of_study': Output as strict integer (1, 2, 3, 4, or 5).
 4. Provide exact substring evidence from the transcript in 'evidence_text'.
-5. Return a valid JSON object:
+5. OUT OF SCOPE / IDENTITY GUARDRAIL:
+   If the user asks who you are, what model you use, or asks off-topic inquiries (weather, general knowledge, coding), extract NOTHING (empty candidates).
+6. Return a valid JSON object:
 {{
   "candidates": [
     {{
@@ -232,18 +297,25 @@ RULES:
                     uncertain = False
                     ambiguity = None
                 elif fid == "programme":
-                    if "bca" in val_lower or "computer" in val_lower:
+                    # Only map to BCA if the user actually stated BCA
+                    if re.search(r"\bbca\b", val_lower) or "bachelor of computer application" in val_lower:
                         val = "BCA"
                         uncertain = False
-                    elif "physics" in val_lower:
+                    elif "physics" in val_lower or "bsc physics" in val_lower:
                         val = "BSc Physics"
                         uncertain = False
-                    elif "english" in val_lower:
+                    elif "english" in val_lower or "ba english" in val_lower:
                         val = "BA English"
                         uncertain = False
                     elif val_lower in [x.lower() for x in spec_enums]:
                         val = next(x for x in spec_enums if x.lower() == val_lower)
                         uncertain = False
+                    elif has_other and other_canonical:
+                        # User stated an unlisted programme (e.g. BTech in Computer Science, Engineering, BCom, etc.)
+                        # Intelligently select 'Other' directly!
+                        val = other_canonical
+                        uncertain = False
+                        ambiguity = None
                     else:
                         uncertain = True
                         ambiguity = f"UNLISTED_OPTION: '{val}' is not in dropdown list."
@@ -341,9 +413,13 @@ RULES:
             if state_val and state_val.lower() != expected_state.lower():
                 location_discrepancy_note = f"NOTICE: The user's city '{city_val.title()}' is in '{expected_state}', but selected state is '{state_val}'. Gently ask if they want to update their state to '{expected_state}'."
 
-        # Step 4: Identify missing fields
-        missing_required = [f for f in required_fields if f not in merged_values or merged_values[f] in (None, "", "unknown")]
-        missing_optional = [f for f in properties if f not in required_fields and (f not in merged_values or merged_values[f] in (None, "", "unknown"))]
+        # Step 4: Identify missing fields in strict schema order
+        ordered_fields = list(properties.keys())
+        missing_required = [f for f in ordered_fields if f in required_fields and (f not in merged_values or merged_values[f] in (None, "", "unknown"))]
+        missing_optional = [f for f in ordered_fields if f not in required_fields and (f not in merged_values or merged_values[f] in (None, "", "unknown"))]
+
+        next_target_field = missing_required[0] if missing_required else (missing_optional[0] if missing_optional else None)
+        next_target_title = properties.get(next_target_field, {}).get("title", next_target_field) if next_target_field else None
 
         # Step 5: Check if user declines optional fields or wants to stop
         user_declined_optional = False
@@ -374,6 +450,8 @@ Remaining Unfilled Required Fields:
 Unfilled Optional Fields:
 {json.dumps(missing_optional)}
 
+Next Target Field to Ask: '{next_target_title}' ({next_target_field})
+
 Location Consistency Check:
 {location_discrepancy_note or "Consistent"}
 
@@ -381,17 +459,23 @@ Is Form Ready to Submit: {is_complete}
 
 INTELLIGENT ASSISTANT GUIDELINES:
 1. Warm, human, empathetic tone (1-2 sentences, 15-25 words max for natural voice synthesis).
-2. Deep Form Understanding:
-   - Understand WHY each field is asked. For example, 'mobile' is for SMS alerts, 'email' is for receipt delivery, 'programme' is their academic focus, and 'support_reason' is why financial assistance is needed.
+2. STRICT SEQUENTIAL ORDER:
+   Always follow the form from top to bottom.
+   If required fields are still missing, ask specifically for the CURRENT next target field: '{next_target_title}'.
+   NEVER jump randomly or ask questions out of order!
+3. PROGRAMME 'OTHER' HANDLING:
+   If user mentioned an unlisted course (like B.Tech, BTech in Computer Science, Engineering, B.Com, MBA) that is not in the 3 specific options (BSc Physics, BCA, BA English):
+   Acknowledge that and explain: "Since B.Tech is not in the options, I have selected 'Other' for you."
+4. Deep Form Understanding:
+   - Understand WHY each field is asked. 'mobile' is for SMS alerts, 'email' is for receipt delivery, 'programme' is their academic focus, and 'support_reason' is why financial assistance is needed.
    - If user asks questions about a field (e.g. "Why do you need my email?", "What courses are available?"), explain concisely and helpfully!
-3. Cross-field Discrepancy:
+5. Cross-field Discrepancy:
    - If {location_discrepancy_note}: Mention it politely in one short sentence: e.g. "I noticed Guwahati is typically in Assam—would you like me to set your state as Assam?"
-4. Open-ended / Paragraph Fields ('support_reason'):
+6. Open-ended / Paragraph Fields ('support_reason'):
    - If asking for 'support_reason', be encouraging: "Could you share what you're studying and how this support will help your education?"
-5. Logical Field Progression:
-   - If required fields are missing: ask for the next required field in natural order (Name -> DOB -> Mobile -> City/State -> Programme -> Year/Details).
+7. Proactive Optional Fields:
    - If all required are filled but optional fields remain (like email): proactively suggest it: "Your required details are all set! Would you like to share your email so we can send your confirmation receipt? Or just say 'no thanks'."
-6. Greet back warmly if the user greets you. Never spell out names letter-by-letter.
+8. Greet back warmly if the user greets you. Never spell out names letter-by-letter.
 
 Return JSON: {{"message": "Spoken assistant reply in target language", "is_complete": boolean}}"""
 

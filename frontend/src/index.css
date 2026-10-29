@@ -2971,3 +2971,45 @@ body {
   pointer-events: none !important;
   cursor: wait !important;
 }
+
+
+/* Header Action Buttons (Create Form / Back to Form) */
+.fs-header-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+.fs-btn-create-form {
+  background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
+  color: #ffffff;
+  border: 1px solid rgba(26, 115, 232, 0.4);
+  box-shadow: 0 2px 8px rgba(26, 115, 232, 0.25);
+}
+
+.fs-btn-create-form:hover {
+  background: linear-gradient(135deg, #1557b0 0%, #0d47a1 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(26, 115, 232, 0.35);
+  color: #ffffff;
+}
+
+.fs-btn-back-form {
+  background: #f1f5f9;
+  color: #1e293b;
+  border: 1px solid #cbd5e1;
+}
+
+.fs-btn-back-form:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+  transform: translateY(-1px);
+}

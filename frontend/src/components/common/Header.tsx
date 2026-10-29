@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Sparkles, Globe, Layers, FileText } from 'lucide-react';
+import { Sparkles, Globe, Plus, ArrowLeft } from 'lucide-react';
 import { api } from '../../services/api';
 
 interface HeaderProps {
@@ -29,8 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
     };
   }, []);
 
-  const isBuilder = location.pathname === '/' || location.pathname.startsWith('/create');
-  const isFiller = location.pathname.startsWith('/fill');
+  const isBuilder = location.pathname.startsWith('/create') || location.pathname.startsWith('/builder');
 
   return (
     <header className="fs-header" role="banner">
@@ -40,9 +39,9 @@ export const Header: React.FC<HeaderProps> = ({
             <Sparkles size={18} className="fs-brand-sparkle" />
           </div>
           <div className="fs-brand-titles">
-            <span className="fs-brand-name">FormSaathi Studio</span>
+            <span className="fs-brand-name">FormSaathi</span>
             <span className="fs-brand-tagline">
-              {locale === 'hi-IN' ? 'आवाज़-सक्षम स्मार्ट फॉर्म' : 'Voice-Assisted Forms'}
+              {locale === 'hi-IN' ? 'आवाज़-सक्षम फॉर्म सहायक' : 'Voice-Assisted Forms'}
             </span>
           </div>
         </Link>
@@ -57,26 +56,8 @@ export const Header: React.FC<HeaderProps> = ({
         )}
       </div>
 
-      <nav className="fs-header-nav" aria-label="Main Navigation">
-        <Link
-          to="/create"
-          className={`fs-nav-tab ${isBuilder ? 'is-active' : ''}`}
-        >
-          <Layers size={16} />
-          <span>Form Builder</span>
-        </Link>
-
-        <Link
-          to="/fill/student_registration_v1"
-          className={`fs-nav-tab ${isFiller ? 'is-active' : ''}`}
-        >
-          <FileText size={16} />
-          <span>Fill Registration</span>
-        </Link>
-      </nav>
-
       <div className="fs-header-right">
-        {/* Backend health pill */}
+        {/* Backend health status indicator */}
         <div
           className={`fs-status-pill ${backendStatus}`}
           title={`Backend status: ${backendStatus}`}
@@ -98,6 +79,27 @@ export const Header: React.FC<HeaderProps> = ({
             <Globe size={15} />
             <span>{locale === 'en-IN' ? 'हिन्दी' : 'English'}</span>
           </button>
+        )}
+
+        {/* Create Form / Back to Form Action Button */}
+        {isBuilder ? (
+          <Link
+            to="/"
+            className="fs-header-action-btn fs-btn-back-form"
+            title="Return to active form"
+          >
+            <ArrowLeft size={15} />
+            <span>Back to Form</span>
+          </Link>
+        ) : (
+          <Link
+            to="/create"
+            className="fs-header-action-btn fs-btn-create-form"
+            title="Open Form Builder"
+          >
+            <Plus size={15} />
+            <span>Create Form</span>
+          </Link>
         )}
       </div>
     </header>
