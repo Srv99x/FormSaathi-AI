@@ -1,5 +1,5 @@
-import React from 'react';
-import { PhoneCall, PhoneOff, Hand, Check, Mic } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { PhoneOff, Hand, Check, Mic, ChevronDown, Sparkles, X } from 'lucide-react';
 import { OrbState } from '../../types/voice';
 import { AudioVisualizer } from './AudioVisualizer';
 import { VoiceOrb } from './VoiceOrb';
@@ -33,6 +33,17 @@ export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
   onInterrupt,
   onDoneSpeaking,
 }) => {
+  // When a call becomes active, ensure it is expanded by default
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    if (isCallActive) {
+      setIsExpanded(true);
+    } else {
+      setIsExpanded(false);
+    }
+  }, [isCallActive]);
+
   const formatTimer = (sec: number) => {
     const m = Math.floor(sec / 60).toString().padStart(2, '0');
     const s = (sec % 60).toString().padStart(2, '0');
@@ -40,38 +51,6 @@ export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
   };
 
   const isHindi = locale === 'hi-IN';
-
-  if (!isCallActive) {
-    return (
-      <div className="fs-voice-bar-idle-wrap">
-        <div className="fs-voice-bar-idle">
-          <div className="fs-voice-bar-idle-info">
-            <div className="fs-voice-bar-idle-icon">
-              <Mic size={20} />
-            </div>
-            <div className="fs-voice-bar-idle-text">
-              <strong>{isHindi ? 'हाथ खाली रख कर फॉर्म भरें' : 'Fill Form Hands-Free'}</strong>
-              <span>
-                {isHindi
-                  ? 'हिन्दी या अंग्रेज़ी में बोलकर आसानी से फॉर्म पूरा करें'
-                  : 'Start a natural voice call in English or Hindi'}
-              </span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            className="fs-start-call-btn"
-            onClick={onStartCall}
-            aria-label="Start Voice Call"
-          >
-            <PhoneCall size={18} />
-            <span>{isHindi ? '📞 आवाज़ कॉल शुरू करें' : '📞 Start Voice Call'}</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   const orbColor =
     orbState === 'listening'
@@ -82,45 +61,145 @@ export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
       ? '#2563eb'
       : '#64748b';
 
+  // 1. Idle state OR Minimized state -> Small icon floating on the bottom right
+  if (!isCallActive || !isExpanded) {
+    return (
+      <aside className="fs-voice-fab-wrap" aria-label="Voice Assistant Floating Action Button">
+        {/* Subtle hover tooltip/pill on the left of the button */}
+        <div className="fs-voice-fab-tooltip">
+          <span className="fs-voice-fab-tooltip-title">
+            {isCallActive
+              ? (isHindi ? 'कॉल जारी है' : 'Call Active')
+              : (isHindi ? 'बोलकर फॉर्म भरें' : 'Fill Form with Voice')}
+          </span>
+          <span className="fs-voice-fab-tooltip-sub">
+            {isCallActive
+              ? (isHindi ? 'टैप करके देखें' : 'Click to open assistant')
+              : (isHindi ? 'आवाज़ सहायक शुरू करें' : 'Click to start voice agent')}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          className={`fs-voice-fab-btn ${isCallActive ? `fs-fab-active fs-fab-${orbState}` : 'fs-fab-idle'}`}
+          onClick={() => {
+            if (!isCallActive) {
+              onStartCall();
+              setIsExpanded(true);
+            } else {
+              setIsExpanded(true);
+            }
+          }}
+          title={isHindi ? 'आवाज़ सहायक' : 'Voice Assistant'}
+          aria-label={
+            isCallActive
+              ? 'Expand Voice Assistant'
+              : 'Start Hands-Free Voice Assistant'
+          }
+        >
+          {/* Animated circular wave ring around the button */}
+          <span className="fs-fab-ripple fs-fab-ripple-1" />
+          <span className="fs-fab-ripple fs-fab-ripple-2" />
+
+          {isCallActive ? (
+            <div className="fs-fab-mini-orb-container">
+              <VoiceOrb state={orbState} size={38} volumeLevel={volumeLevel} />
+              <span className="fs-fab-live-dot" style={{ backgroundColor: orbColor }} />
+            </div>
+          ) : (
+            <div className="fs-fab-icon-inner">
+              <Mic size={24} className="fs-fab-mic-icon" />
+              <Sparkles size={14} className="fs-fab-sparkle" />
+            </div>
+          )}
+        </button>
+      </aside>
+    );
+  }
+
+  // 2. Expanded Voice Agent Dialog Card (Floating Bottom-Right)
   return (
-    <div className="fs-voice-bar-dock" role="region" aria-label="Active Voice Assistant Call">
-      <div className="fs-voice-bar-inner">
-        {/* Left: Animated Orb + Audio Visualizer */}
-        <div className="fs-voice-bar-left">
-          <VoiceOrb state={orbState} size={54} volumeLevel={volumeLevel} />
-          <div className="fs-voice-bar-viz">
-            <AudioVisualizer
-              volume={volumeLevel}
-              isActive={orbState === 'listening' || orbState === 'speaking'}
-              color={orbColor}
-            />
-            <span className="fs-call-duration">{formatTimer(callDurationSeconds)}</span>
+    <aside
+      className="fs-voice-widget-card"
+      role="dialog"
+      aria-label="Active Voice Assistant Call"
+    >
+      {/* Top Header */}
+      <div className="fs-widget-header">
+        <div className="fs-widget-header-left">
+          <span className="fs-widget-live-dot" style={{ backgroundColor: orbColor }} />
+          <div className="fs-widget-titles">
+            <span className="fs-widget-title">
+              {isHindi ? 'आवाज़ सहायक' : 'Voice Assistant'}
+            </span>
+            <span className="fs-widget-timer">{formatTimer(callDurationSeconds)}</span>
           </div>
         </div>
 
-        {/* Center: Live Assistant subtitles and user speech */}
-        <div className="fs-voice-bar-center">
-          <div className="fs-voice-state-pill" style={{ color: orbColor }}>
-            <span className="fs-state-dot" style={{ backgroundColor: orbColor }} />
-            <span className="fs-state-text">
-              {orbState === 'listening' && (isHindi ? 'सुन रहा हूँ... बोलिए' : "Listening... speak now")}
-              {orbState === 'thinking' && (isHindi ? 'सोच रहा हूँ...' : 'Processing entity extraction...')}
-              {orbState === 'speaking' && (isHindi ? 'बोल रहा हूँ...' : 'Speaking...')}
-              {orbState === 'idle' && (isHindi ? 'निष्क्रिय' : 'Ready')}
-            </span>
-
-            {lastAutoFilledCount > 0 && (
-              <span className="fs-autofill-badge">
-                ✓ {lastAutoFilledCount} {isHindi ? 'फ़ील्ड भरे गए' : 'fields populated'}
-              </span>
-            )}
-          </div>
-
-          <div
-            className="fs-voice-message"
-            aria-live="polite"
-            title={assistantMessage}
+        <div className="fs-widget-header-actions">
+          {/* Minimize button to collapse into small right-side icon */}
+          <button
+            type="button"
+            className="fs-widget-icon-btn"
+            onClick={() => setIsExpanded(false)}
+            title={isHindi ? 'छोटा करें' : 'Minimize to floating icon'}
+            aria-label="Minimize Voice Assistant"
           >
+            <ChevronDown size={18} />
+          </button>
+
+          {/* End Call button */}
+          <button
+            type="button"
+            className="fs-widget-icon-btn fs-widget-btn-close"
+            onClick={onEndCall}
+            title={isHindi ? 'कॉल समाप्त' : 'End Call'}
+            aria-label="End call"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      </div>
+
+      {/* Main Center: Circular Wave Voice Agent */}
+      <div className="fs-widget-body">
+        <div className="fs-widget-orb-stage">
+          <VoiceOrb state={orbState} size={88} volumeLevel={volumeLevel} />
+        </div>
+
+        {/* Audio Visualizer beneath the orb */}
+        <div className="fs-widget-viz-wrap">
+          <AudioVisualizer
+            volume={volumeLevel}
+            isActive={orbState === 'listening' || orbState === 'speaking'}
+            color={orbColor}
+            barsCount={10}
+          />
+        </div>
+
+        {/* State Pill */}
+        <div className="fs-widget-status-badge" style={{ color: orbColor }}>
+          <span className="fs-state-dot" style={{ backgroundColor: orbColor }} />
+          <span className="fs-status-label">
+            {orbState === 'listening' && (isHindi ? 'सुन रहा हूँ... बोलिए' : 'Listening... speak now')}
+            {orbState === 'thinking' && (isHindi ? 'समझ रहा हूँ...' : 'Extracting details...')}
+            {orbState === 'speaking' && (isHindi ? 'बोल रहा हूँ...' : 'Speaking...')}
+            {orbState === 'idle' && (isHindi ? 'तैयार' : 'Ready')}
+          </span>
+
+          {lastAutoFilledCount > 0 && (
+            <span className="fs-autofill-badge">
+              ✓ {lastAutoFilledCount} {isHindi ? 'फ़ील्ड भरे गए' : 'fields populated'}
+            </span>
+          )}
+        </div>
+
+        {/* Dialogue / Speech Bubble */}
+        <div className="fs-widget-dialogue-box">
+          <div className="fs-widget-assistant-msg" aria-live="polite">
+            <span className="fs-dialogue-sender">
+              {isHindi ? 'सहायक: ' : 'Assistant: '}
+            </span>
             {assistantMessage ||
               (isHindi
                 ? 'नमस्ते! कृपया अपनी जानकारी बताएं...'
@@ -128,56 +207,56 @@ export const VoiceAgentBar: React.FC<VoiceAgentBarProps> = ({
           </div>
 
           {userTranscript && orbState !== 'speaking' && (
-            <div className="fs-user-transcript-preview">
-              <span className="fs-transcript-label">{isHindi ? 'आपने कहा: ' : 'You said: '}</span>
-              <span className="fs-transcript-text">"{userTranscript}"</span>
+            <div className="fs-widget-user-msg">
+              <span className="fs-user-label">{isHindi ? 'आपने कहा: ' : 'You: '}</span>
+              <span className="fs-user-text">"{userTranscript}"</span>
             </div>
           )}
         </div>
+      </div>
 
-        {/* Right: Controls (Interrupt, Done Speaking, End Call) */}
-        <div className="fs-voice-bar-right">
-          {/* Barge-in interrupt button */}
-          {orbState === 'speaking' && (
-            <button
-              type="button"
-              className="fs-control-btn fs-btn-interrupt"
-              onClick={onInterrupt}
-              title="Interrupt Assistant (Barge-in)"
-              aria-label="Tap to interrupt assistant"
-            >
-              <Hand size={16} />
-              <span>{isHindi ? 'बोलने दें' : 'Tap to Interrupt'}</span>
-            </button>
-          )}
-
-          {/* Done speaking button (manual push when done) */}
-          {orbState === 'listening' && (
-            <button
-              type="button"
-              className="fs-control-btn fs-btn-done"
-              onClick={onDoneSpeaking}
-              title="Done speaking, submit turn"
-              aria-label="Done speaking"
-            >
-              <Check size={16} />
-              <span>{isHindi ? 'बोल चुका' : 'Done Speaking'}</span>
-            </button>
-          )}
-
-          {/* End Call Button */}
+      {/* Footer Controls */}
+      <div className="fs-widget-footer">
+        {/* Barge-in interrupt button when assistant is speaking */}
+        {orbState === 'speaking' && (
           <button
             type="button"
-            className="fs-control-btn fs-btn-end"
-            onClick={onEndCall}
-            title="End Voice Call"
-            aria-label="End call"
+            className="fs-control-btn fs-btn-interrupt fs-widget-action-btn"
+            onClick={onInterrupt}
+            title="Interrupt Assistant (Barge-in)"
+            aria-label="Tap to interrupt assistant"
           >
-            <PhoneOff size={16} />
-            <span>{isHindi ? 'कॉल समाप्त' : 'End Call'}</span>
+            <Hand size={16} />
+            <span>{isHindi ? 'रोकें व बोलें' : 'Tap to Interrupt'}</span>
           </button>
-        </div>
+        )}
+
+        {/* Done speaking button when listening */}
+        {orbState === 'listening' && (
+          <button
+            type="button"
+            className="fs-control-btn fs-btn-done fs-widget-action-btn"
+            onClick={onDoneSpeaking}
+            title="Done speaking, submit speech turn"
+            aria-label="Done speaking"
+          >
+            <Check size={16} />
+            <span>{isHindi ? 'बोल चुका' : 'Done Speaking'}</span>
+          </button>
+        )}
+
+        {/* End Call Button */}
+        <button
+          type="button"
+          className="fs-control-btn fs-btn-end fs-widget-end-btn"
+          onClick={onEndCall}
+          title="End Voice Call"
+          aria-label="End call"
+        >
+          <PhoneOff size={16} />
+          <span>{isHindi ? 'कॉल समाप्त' : 'End Call'}</span>
+        </button>
       </div>
-    </div>
+    </aside>
   );
 };

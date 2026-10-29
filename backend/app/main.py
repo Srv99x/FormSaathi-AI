@@ -1,3 +1,4 @@
+import os
 import secrets
 import sys
 
@@ -28,12 +29,33 @@ def error_response(status, code, message, field_id=None, retryable=False):
 def create_app(store: SessionStore | None = None) -> FastAPI:
     application = FastAPI(title="FormSaathi AI", version="0.1.0")
     application.state.sessions = store if store is not None else SessionStore()
-    application.add_middleware(CORSMiddleware,
-                               allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
-                                              "http://localhost:8000", "http://127.0.0.1:8000",
-                                              "null"],
-                               allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-                               allow_headers=["*"])
+
+    # Dynamic CORS origin handling for Render (backend) and Vercel (frontend)
+    cors_env = os.environ.get("CORS_ORIGINS", "")
+    allowed_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "null",
+    ]
+    if cors_env:
+        if cors_env.strip() == "*":
+            allowed_origins = ["*"]
+        else:
+            for origin in cors_env.split(","):
+                cleaned = origin.strip()
+                if cleaned and cleaned not in allowed_origins:
+                    allowed_origins.append(cleaned)
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_origin_regex=r"https://.*\.vercel\.app" if allowed_origins != ["*"] else None,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
     @application.exception_handler(APIError)
     async def api_error(request: Request, exc: APIError):
@@ -53,3 +75,8 @@ def create_app(store: SessionStore | None = None) -> FastAPI:
 
 
 app = create_app()
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port)

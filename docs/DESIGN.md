@@ -1,4 +1,4 @@
-# FormSaathi AI — Frontend Architecture & Design Specification (design.md)
+# FormSaathi AI — Frontend Architecture & Design Specification (DESIGN.md)
 
 **Document Version:** 1.0.0  
 **Target Platform:** React (Vite / TypeScript) + Vanilla CSS / Material Design System  

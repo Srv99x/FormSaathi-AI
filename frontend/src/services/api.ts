@@ -2,6 +2,14 @@ import { FormCatalogItem } from '../types/form';
 import { ConfirmationRecord, PatchResponse, ReviewResponse, SessionData, ValidationSnapshot } from '../types/session';
 import { AssistantTurnResponse } from '../types/voice';
 
+// Resolve API base URL: Use VITE_API_BASE_URL when provided (e.g. deployed on Vercel),
+// falling back to local proxy path '/api' in development. Safely handles Node.js test runner environments.
+const rawEnvUrl = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_API_BASE_URL : '';
+const envBase = (rawEnvUrl || '').replace(/\/+$/, '');
+const API_BASE_URL = envBase
+  ? (envBase.endsWith('/api') ? envBase : `${envBase}/api`)
+  : '/api';
+
 /**
  * Custom error class for API responses that preserves HTTP status and error payload
  */
@@ -50,10 +58,10 @@ export function isNetworkOrServerUnavailable(err: unknown): boolean {
 }
 
 /**
- * Low-level API client proxying to FastAPI backend on /api
+ * Low-level API client proxying to FastAPI backend
  */
 class ApiService {
-  private baseUrl = '/api';
+  private baseUrl = API_BASE_URL;
 
   async getHealth(): Promise<{ status: string; speech_provider: string; extraction_provider: string }> {
     try {

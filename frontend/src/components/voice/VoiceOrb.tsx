@@ -28,11 +28,12 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
       {/* Outer ambient glow ring */}
       <div className="fs-orb-glow" />
 
-      {/* State-specific ripple rings */}
+      {/* State-specific ripple rings for circular sound waves */}
       {state === 'listening' && (
         <>
           <div className="fs-orb-ring fs-ring-green-1" />
           <div className="fs-orb-ring fs-ring-green-2" />
+          <div className="fs-orb-ring fs-ring-green-3" />
         </>
       )}
 
@@ -47,7 +48,12 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
         <>
           <div className="fs-orb-ring fs-ring-blue-1" />
           <div className="fs-orb-ring fs-ring-blue-2" />
+          <div className="fs-orb-ring fs-ring-blue-3" />
         </>
+      )}
+
+      {state === 'idle' && (
+        <div className="fs-orb-ring fs-ring-idle" />
       )}
 
       {/* SVG Core Orb */}
@@ -135,4 +141,3 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
     </div>
   );
 };
-

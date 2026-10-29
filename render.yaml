@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: formsaathi-backend
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.9
+      - key: CORS_ORIGINS
+        value: "https://*.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
+      # AI Provider Keys - set in Render Dashboard
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+
