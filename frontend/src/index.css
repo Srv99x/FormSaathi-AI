@@ -2925,3 +2925,49 @@ body {
     padding: 0;
   }
 }
+
+
+/* Fullscreen Ambient Border Glow (Active while AI Agent is Thinking / Typing) */
+.fs-fullscreen-ambient-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 80;
+  box-shadow: inset 0 0 35px rgba(212, 175, 55, 0.28), inset 0 0 10px rgba(212, 175, 55, 0.45);
+  border: 2px solid rgba(212, 175, 55, 0.35);
+  opacity: 0;
+  transition: opacity 0.35s ease-in-out;
+}
+
+.fs-fullscreen-ambient-glow.fs-glow-active {
+  opacity: 1;
+  animation: ambient-screen-pulse 2.2s infinite ease-in-out;
+}
+
+@keyframes ambient-screen-pulse {
+  0%, 100% {
+    box-shadow: inset 0 0 25px rgba(212, 175, 55, 0.22), inset 0 0 6px rgba(212, 175, 55, 0.35);
+    border-color: rgba(212, 175, 55, 0.3);
+  }
+  50% {
+    box-shadow: inset 0 0 50px rgba(212, 175, 55, 0.48), inset 0 0 14px rgba(212, 175, 55, 0.7);
+    border-color: rgba(212, 175, 55, 0.6);
+  }
+}
+
+/* Locked Form State while AI Agent is Actively Processing & Typing */
+.fs-form-locked-working {
+  pointer-events: none !important;
+  user-select: none !important;
+  cursor: wait !important;
+  position: relative;
+  transition: opacity 0.25s ease;
+}
+
+.fs-form-locked-working input,
+.fs-form-locked-working select,
+.fs-form-locked-working textarea,
+.fs-form-locked-working button {
+  pointer-events: none !important;
+  cursor: wait !important;
+}

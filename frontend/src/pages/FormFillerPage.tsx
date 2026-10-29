@@ -11,7 +11,6 @@ import { Toast } from '../components/common/Toast';
 import { FieldCard } from '../components/filler/FieldCard';
 import { FormSubmissionCard } from '../components/filler/FormSubmissionCard';
 import { ConfirmationReceipt } from '../components/filler/ConfirmationReceipt';
-import { NameSpellingModal } from '../components/filler/NameSpellingModal';
 import { VoiceAgentBar } from '../components/voice/VoiceAgentBar';
 
 export const FormFillerPage: React.FC = () => {
@@ -92,15 +91,14 @@ export const FormFillerPage: React.FC = () => {
   const {
     isCallActive,
     isPaused,
+    isAgentWorking,
     orbState,
     callDurationSeconds,
     volumeLevel,
-    pendingSpellingVerification,
     startCall,
     endCall,
     togglePause,
     interruptAssistant,
-    resolveSpelling,
     skipOptionalAndFinalize,
   } = useVoiceCall({
     formSchema,
@@ -176,6 +174,9 @@ export const FormFillerPage: React.FC = () => {
 
   return (
     <div className="fs-filler-page-wrapper">
+      {/* Subtle fullscreen ambient glow while the AI agent is working/typing */}
+      <div className={`fs-fullscreen-ambient-glow ${isAgentWorking ? 'fs-glow-active' : ''}`} />
+
       <Header
         locale={locale}
         onToggleLocale={handleToggleLocale}
@@ -227,8 +228,8 @@ export const FormFillerPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Questionnaire Cards */}
-              <div className="fs-filler-questions-list">
+              {/* Questionnaire Cards (Locked while AI agent is typing) */}
+              <div className={`fs-filler-questions-list ${isAgentWorking ? 'fs-form-locked-working' : ''}`}>
                 {formSchema.fields.map((field, idx) => (
                   <FieldCard
                     key={field.id}
@@ -273,17 +274,6 @@ export const FormFillerPage: React.FC = () => {
           onEndCall={endCall}
           onTogglePause={togglePause}
           onInterrupt={interruptAssistant}
-        />
-      )}
-
-      {/* Phonetic Spelling Verification Modal */}
-      {pendingSpellingVerification && (
-        <NameSpellingModal
-          isOpen={true}
-          candidateName={pendingSpellingVerification.name}
-          spellingHint={pendingSpellingVerification.spelling}
-          onConfirm={(confirmed) => resolveSpelling(confirmed)}
-          onClose={() => resolveSpelling(pendingSpellingVerification.name)}
         />
       )}
 

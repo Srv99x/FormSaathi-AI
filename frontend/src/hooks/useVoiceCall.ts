@@ -157,15 +157,7 @@ export function useVoiceCall({
           setLastAutoFilledFields(changedFields);
         }
 
-        // Phonetic verification trigger
-        if (turnResponse.name_candidate && turnResponse.name_spelling) {
-          setPendingSpellingVerification({
-            name: turnResponse.name_candidate,
-            spelling: turnResponse.name_spelling,
-            fieldId: 'full_name',
-          });
-        }
-
+        // Direct typing into form - no confirmation modal
         const replyText = turnResponse.assistant_message || '';
         setAssistantMessage(replyText);
 
@@ -397,9 +389,12 @@ export function useVoiceCall({
     };
   }, []);
 
+  const isAgentWorking = isCallActive && (orbState === 'thinking' || orbState === 'speaking');
+
   return {
     isCallActive,
     isPaused,
+    isAgentWorking,
     orbState,
     assistantMessage,
     userTranscript,
