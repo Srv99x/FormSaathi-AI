@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { AudioRecorder } from "./components/AudioRecorder";
 import {
   FORM_IDS,
   FormId,
@@ -60,6 +61,14 @@ export const App: React.FC = () => {
   const [session, setSession] = useState<SessionData | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState<boolean>(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+
+  // Recorded audio state (from A3 AudioRecorder)
+  const [recordedAudio, setRecordedAudio] = useState<{
+    blob: Blob;
+    filename: string;
+    duration: number;
+  } | null>(null);
+  const [isManualFallback, setIsManualFallback] = useState<boolean>(false);
 
   // Fetch available forms from GET /api/forms
   const fetchForms = async () => {
@@ -155,6 +164,8 @@ export const App: React.FC = () => {
     setSession(null);
     setSelectedFormId(null);
     setSessionError(null);
+    setRecordedAudio(null);
+    setIsManualFallback(false);
     setCurrentScreen("S1");
   };
 
@@ -457,48 +468,94 @@ export const App: React.FC = () => {
         )}
 
         {/* =================================================================== */}
-        {/* S4 — Ready for Voice Recording (A2 Handoff Shell)                   */}
+        {/* S4 — Voice Recording (A3 AudioRecorder Integration)                 */}
         {/* =================================================================== */}
         {currentScreen === "S4" && (
-          <section aria-labelledby="session-ready-heading">
-            <h1 id="session-ready-heading" className="screen-heading">
+          <section aria-labelledby="session-record-heading">
+            <h1 id="session-record-heading" className="screen-heading">
               {t(S4.heading, locale)}
             </h1>
             <p className="screen-subheading">{t(S4.instruction, locale)}</p>
 
-            <div className="placeholder-view">
-              <div className="placeholder-icon" aria-hidden="true">
-                🎙️
-              </div>
-              <div>
-                <p style={{ fontWeight: 600, color: "var(--color-navy)", marginBottom: 4 }}>
-                  {locale === "en-IN"
-                    ? "Session Initialized"
-                    : "सेशन प्रारंभ हो गया"}
-                </p>
-                <p style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>
-                  {locale === "en-IN"
-                    ? "Form and language selected. Ready for microphone recording component (A3 workstream)."
-                    : "फॉर्म और भाषा चुनी गई। माइक्रोफ़ोन रिकॉर्डिंग घटक (A3 कार्यप्रवाह) के लिए तैयार।"}
-                </p>
-              </div>
-
-              {session && (
-                <div style={{ textAlign: "left", width: "100%" }}>
-                  <div className="feature-item" style={{ flexDirection: "column", gap: 4 }}>
-                    <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                      {locale === "en-IN" ? "ACTIVE SESSION ID" : "सक्रिय सेशन आईडी"}
-                    </div>
-                    <code className="session-badge">{session.session_id}</code>
-                    <div style={{ fontSize: "0.8125rem", color: "var(--color-text-secondary)", marginTop: 4 }}>
-                      <strong>{locale === "en-IN" ? "Form: " : "फॉर्म: "}</strong>
-                      {session.form_id} | <strong>{locale === "en-IN" ? "Locale: " : "भाषा: "}</strong>
-                      {locale}
-                    </div>
+            {/* Session metadata badge */}
+            {session && (
+              <div style={{ marginBottom: 16 }}>
+                <div
+                  className="feature-item"
+                  style={{ flexDirection: "column", gap: 4, padding: "10px 14px" }}
+                >
+                  <div style={{ fontSize: "0.6875rem", color: "var(--color-text-muted)" }}>
+                    {locale === "en-IN" ? "ACTIVE SESSION ID" : "सक्रिय सेशन आईडी"}
+                  </div>
+                  <code className="session-badge">{session.session_id}</code>
+                  <div
+                    style={{
+                      fontSize: "0.8125rem",
+                      color: "var(--color-text-secondary)",
+                      marginTop: 2,
+                    }}
+                  >
+                    <strong>{locale === "en-IN" ? "Form: " : "फॉर्म: "}</strong>
+                    {session.form_id} |{" "}
+                    <strong>{locale === "en-IN" ? "Locale: " : "भाषा: "}</strong>
+                    {locale}
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* Audio Recorder Component */}
+            {!isManualFallback ? (
+              <AudioRecorder
+                locale={locale}
+                maxDurationSeconds={25}
+                onRecordingComplete={(blob, filename, duration) => {
+                  setRecordedAudio({ blob, filename, duration });
+                }}
+                onSkipToManual={() => {
+                  setIsManualFallback(true);
+                }}
+              />
+            ) : (
+              <div className="notice-info" style={{ marginTop: 12 }}>
+                <p style={{ fontWeight: 600 }}>
+                  {locale === "en-IN"
+                    ? "Manual Entry Mode Selected"
+                    : "मैन्युअल प्रविष्टि मोड चुना गया"}
+                </p>
+                <p style={{ marginTop: 4 }}>
+                  {locale === "en-IN"
+                    ? "Voice recording bypassed. In milestone A5/A6, you will be able to fill all form fields directly."
+                    : "आवाज़ रिकॉर्डिंग छोड़ दी गई। अगले चरण (A5/A6) में आप सीधे सभी फॉर्म फ़ील्ड भर सकेंगे।"}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ marginTop: 12 }}
+                  onClick={() => setIsManualFallback(false)}
+                >
+                  🎙️ {locale === "en-IN" ? "Switch Back to Voice" : "वापस आवाज़ रिकॉर्डिंग पर जाएं"}
+                </button>
+              </div>
+            )}
+
+            {/* If audio has been accepted and ready for upload (A4 bridge) */}
+            {recordedAudio && !isManualFallback && (
+              <div className="notice-info" style={{ marginTop: 16 }}>
+                <p style={{ fontWeight: 600, color: "var(--color-teal-hover)" }}>
+                  ✓ {locale === "en-IN" ? "Audio Captured Ready for Speech API" : "ऑडियो तैयार (स्पीच API के लिए)"}
+                </p>
+                <p style={{ fontSize: "0.8125rem", marginTop: 4 }}>
+                  {recordedAudio.filename} ({recordedAudio.duration}s,{" "}
+                  {Math.round(recordedAudio.blob.size / 1024)} KB)
+                </p>
+                <p style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", marginTop: 4 }}>
+                  {locale === "en-IN"
+                    ? "Handoff to A4: Speech-to-text upload & transcript review."
+                    : "कार्यप्रवाह A4 के लिए तैयार: स्पीच अपलोड और ट्रांसक्रिप्ट जांच।"}
+                </p>
+              </div>
+            )}
 
             <div className="actions-footer">
               <button
