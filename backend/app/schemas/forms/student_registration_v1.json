@@ -1,0 +1,20 @@
+{
+  "$id": "student_registration_v1",
+  "title": "Student Registration",
+  "description": "A FormSaathi-owned local student registration demo.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "full_name": {"title":"Full name","type":"string","minLength":2,"maxLength":80},
+    "date_of_birth": {"title":"Date of birth","type":"string","format":"date"},
+    "mobile": {"title":"Mobile number","type":"string","pattern":"^[6-9][0-9]{9}$"},
+    "email": {"title":"Email","type":["string","null"],"format":"email","maxLength":254},
+    "city": {"title":"City","type":"string","minLength":2,"maxLength":80},
+    "state": {"title":"State","type":"string","enum":["Assam","Manipur","Meghalaya","Tripura","Arunachal Pradesh","Nagaland","Mizoram","Other Indian State/UT"]},
+    "programme": {"title":"Course or programme","type":"string","enum":["BSc Physics","BCA","BA English","Other"]},
+    "institution": {"title":"Institution","type":["string","null"],"minLength":2,"maxLength":120},
+    "guardian_name": {"title":"Guardian name","type":["string","null"],"minLength":2,"maxLength":80},
+    "preferred_language": {"title":"Preferred language","type":["string","null"],"enum":["English","Hindi",null]}
+  },
+  "required": ["full_name","date_of_birth","mobile","city","state","programme"]
+}

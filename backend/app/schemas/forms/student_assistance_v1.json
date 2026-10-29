@@ -1,0 +1,21 @@
+{
+  "$id": "student_assistance_v1",
+  "title": "Student Assistance Request",
+  "description": "A FormSaathi-owned local student assistance demo.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "full_name": {"title":"Applicant name","type":"string","minLength":2,"maxLength":80},
+    "date_of_birth": {"title":"Date of birth","type":"string","format":"date"},
+    "mobile": {"title":"Mobile","type":"string","pattern":"^[6-9][0-9]{9}$"},
+    "email": {"title":"Email","type":["string","null"],"format":"email","maxLength":254},
+    "institution": {"title":"College or institute","type":"string","minLength":2,"maxLength":120},
+    "programme": {"title":"Course","type":"string","enum":["BSc Physics","BCA","BA English","Other"]},
+    "year_of_study": {"title":"Study year","type":"integer","minimum":1,"maximum":5},
+    "city": {"title":"City","type":"string","minLength":2,"maxLength":80},
+    "state": {"title":"State","type":"string","enum":["Assam","Manipur","Meghalaya","Tripura","Arunachal Pradesh","Nagaland","Mizoram","Other Indian State/UT"]},
+    "assistance_type": {"title":"Help needed","type":"string","enum":["books","transport","fees","other"]},
+    "support_reason": {"title":"Short reason","type":["string","null"],"maxLength":240}
+  },
+  "required": ["full_name","date_of_birth","mobile","institution","programme","year_of_study","city","state","assistance_type"]
+}
