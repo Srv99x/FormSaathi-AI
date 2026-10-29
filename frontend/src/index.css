@@ -1274,7 +1274,37 @@ body {
   margin-top: 4px;
 }
 
-/* Pre-submission Summary Card */
+/* Simple Form Submit Container */
+.fs-simple-submit-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 0 36px 0;
+}
+
+.fs-simple-submit-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.fs-simple-submit-btn {
+  padding: 10px 32px !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.fs-simple-submit-hint {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* Pre-submission Summary Card (Legacy/Fallback) */
 .fs-submission-card {
   padding: 24px;
   display: flex;
