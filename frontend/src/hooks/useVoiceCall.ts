@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../services/api';
+import { api, isNetworkOrServerUnavailable } from '../services/api';
 import { tts } from '../services/ttsService';
 import { getCachedIntroAudio } from '../services/cachedAudio';
 import { FormSchema } from '../types/form';
@@ -92,9 +92,9 @@ export function useVoiceCall({
   } = useMediaRecorder({
     onAudioData: handleAudioData,
     onSilenceDetected: handleSilenceDetected,
-    silenceThresholdMs: 1000,
-    energyThreshold: 26,
-    maxRecordingDurationMs: 5500,
+    silenceThresholdMs: 1500,
+    energyThreshold: 20,
+    maxRecordingDurationMs: 25000,
   });
 
   // Execute conversational turn
@@ -124,13 +124,14 @@ export function useVoiceCall({
           setUserTranscript(turnResponse.user_transcript);
         }
 
-        // Live Field Auto-population
+        // Live Field Auto-population (F-005: Filter out uncertain / ambiguous candidates)
         const recognizedCandidates = turnResponse.candidates || [];
         const recognizedValues: Record<string, string | number | null> = {};
         const changedFields: string[] = [];
 
         recognizedCandidates.forEach((c) => {
-          if (c.value !== undefined && c.value !== null && String(c.value).trim() !== '') {
+          // Reject ambiguous or uncertain candidates from auto-filling without clarification
+          if (!c.uncertain && c.value !== undefined && c.value !== null && String(c.value).trim() !== '') {
             recognizedValues[c.field_id] = c.value;
             changedFields.push(c.field_id);
             if (onFieldHighlighted) {
@@ -177,22 +178,40 @@ export function useVoiceCall({
         console.warn('Voice turn error, falling back gracefully', err);
         if (callSessionTokenRef.current !== currentToken || !isCallActiveRef.current) return;
 
-        const fallbackMsg =
+        // F-007: Honest error handling when backend/AI service is unavailable
+        const isUnavailable =
+          isNetworkOrServerUnavailable(err) ||
+          err?.status === 401 ||
+          err?.status === 403 ||
+          (err?.status && err.status >= 500);
+
+        if (isUnavailable) {
+          const serviceErrMsg =
+            localeRef.current === 'hi-IN'
+              ? 'वॉइस सेवा अस्थायी रूप से अनुपलब्ध है। कृपया विवरण मैन्युअल रूप से दर्ज करें।'
+              : 'Voice service is temporarily unavailable. Please enter details manually or retry.';
+          setAssistantMessage(serviceErrMsg);
+          setOrbState('idle');
+          return;
+        }
+
+        // Minor conversational retry
+        const retryMsg =
           localeRef.current === 'hi-IN'
-            ? 'मैंने आपकी बात सुन ली है। कृपया अगले फ़ील्ड की जानकारी बताएं।'
-            : "I heard you. Please continue with your details or tap any field to edit.";
-        setAssistantMessage(fallbackMsg);
+            ? 'क्षमा करें, मैं ठीक से समझ नहीं पाया। कृपया दोबारा बताएं।'
+            : 'I could not catch that clearly. Please repeat or tap any field to edit.';
+        setAssistantMessage(retryMsg);
         setOrbState('speaking');
 
         let fallbackAudio: string | null = null;
         try {
-          fallbackAudio = await api.synthesizeTTS(fallbackMsg, localeRef.current);
+          fallbackAudio = await api.synthesizeTTS(retryMsg, localeRef.current);
         } catch {
           // ignore
         }
 
         if (callSessionTokenRef.current === currentToken && isCallActiveRef.current && !isPausedRef.current) {
-          await tts.speak(fallbackMsg, fallbackAudio, localeRef.current);
+          await tts.speak(retryMsg, fallbackAudio, localeRef.current);
         }
 
         if (callSessionTokenRef.current === currentToken && isCallActiveRef.current && !isPausedRef.current) {
@@ -280,7 +299,8 @@ export function useVoiceCall({
     }
 
     // 1. Instantly play pre-cached introductory line (0ms latency, zero waiting!)
-    const intro = getCachedIntroAudio(localeRef.current);
+    const intro = await getCachedIntroAudio(localeRef.current);
+    if (callSessionTokenRef.current !== currentToken || !isCallActiveRef.current) return;
     setAssistantMessage(intro.text);
     setOrbState('speaking');
 

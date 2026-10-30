@@ -12,9 +12,9 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}) {
   const {
     onAudioData,
     onSilenceDetected,
-    silenceThresholdMs = 1000,
-    energyThreshold = 25,
-    maxRecordingDurationMs = 5500,
+    silenceThresholdMs = 1500,
+    energyThreshold = 20,
+    maxRecordingDurationMs = 25000,
   } = options;
 
   const [isRecording, setIsRecording] = useState(false);

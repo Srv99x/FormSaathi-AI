@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { api, isNetworkOrServerUnavailable } from '../services/api';
 import { FormSchema } from '../types/form';
-import { resolveFormSchema } from '../services/schemaMapper';
+import { resolveFormSchema, formSchemaToJsonSchema } from '../services/schemaMapper';
 import { ConfirmationRecord, FieldValidationStatus, ReviewResponse, SessionData } from '../types/session';
 
 const MONTH_NAMES: Record<string, number> = {
@@ -120,19 +120,20 @@ export function checkDate(
     (parsedYear === todayYear && parsedMonth === todayMonth && parsedDay > todayDay)
   ) {
     return {
-      parsed: isoFormatted,
+      parsed: null,
       status: 'invalid',
       message: 'Date of birth cannot be in the future.',
     };
   }
 
-  // Calculate age: today.year - parsed.year - ((today.month, today.day) < (parsed.month, parsed.day))
+  // Calculate age accurately
   let age = todayYear - parsedYear;
   if (todayMonth < parsedMonth || (todayMonth === parsedMonth && todayDay < parsedDay)) {
     age--;
   }
 
   if (age < 12 || age > 100) {
+    // Slash input is never an explicit acknowledgement of an outlier.
     if (!manual || trimmed.includes('/')) {
       return {
         parsed: isoFormatted,
@@ -156,8 +157,7 @@ export function checkDate(
 
 export function computeLocalValidation(
   schema: FormSchema,
-  currentValues: Record<string, string | number | null>,
-  today: Date = new Date(),
+  values: Record<string, string | number | null>,
   manual: boolean = true
 ): {
   fieldStatuses: Record<string, FieldValidationStatus>;
@@ -173,29 +173,31 @@ export function computeLocalValidation(
   const invalidFields: string[] = [];
   const needsReviewFields: string[] = [];
 
-  for (const field of schema.fields) {
-    const rawVal = currentValues[field.id];
-    const hasValue = rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '';
+  const today = new Date();
 
-    if (!hasValue) {
+  for (const field of schema.fields) {
+    const rawVal = values[field.id];
+    const isMissing = rawVal === undefined || rawVal === null || String(rawVal).trim() === '';
+
+    if (isMissing) {
       if (field.required) {
         fieldStatuses[field.id] = 'empty';
         fieldMessages[field.id] = `${field.label} is required.`;
         missingFields.push(field.id);
       } else {
-        fieldStatuses[field.id] = 'empty';
+        fieldStatuses[field.id] = 'valid';
       }
       continue;
     }
 
     const strVal = String(rawVal).trim();
 
-    // Check integer fields (e.g. year_of_study)
-    if (field.type === 'integer' || field.id === 'year_of_study') {
-      const num = Number(rawVal);
-      if (isNaN(num) || !Number.isInteger(num)) {
+    // Check number type
+    if (field.type === 'integer' || (field.type as string) === 'number') {
+      const num = Number(strVal);
+      if (isNaN(num)) {
         fieldStatuses[field.id] = 'invalid';
-        fieldMessages[field.id] = `${field.label} must be a valid integer.`;
+        fieldMessages[field.id] = `${field.label} must be a valid number.`;
         invalidFields.push(field.id);
         continue;
       }
@@ -437,7 +439,9 @@ export function useFormSession(initialSchema?: FormSchema | null) {
       schemaRef.current = activeSchema;
 
       try {
-        const sess = await api.createSession(formId, locale);
+        const isBuiltin = ['student_registration_v1', 'student_assistance_v1'].includes(formId);
+        const customJsonSchema = !isBuiltin && activeSchema ? formSchemaToJsonSchema(activeSchema) : undefined;
+        const sess = await api.createSession(formId, locale, customJsonSchema);
         setSession(sess);
         setRevision(sess.revision);
 
@@ -484,8 +488,28 @@ export function useFormSession(initialSchema?: FormSchema | null) {
     []
   );
 
+  const switchLocale = useCallback(
+    async (nextLocale: 'en-IN' | 'hi-IN') => {
+      if (!session) return;
+      const isLocalSession = session.session_id.startsWith('local-session-');
+      if (isLocalSession) {
+        setSession((prev) => (prev ? { ...prev, locale: nextLocale } : prev));
+        return;
+      }
+      try {
+        const updated = await api.updateSessionLocale(session.session_id, nextLocale);
+        setSession((prev) => (prev ? { ...prev, locale: updated.locale, revision: updated.revision } : prev));
+        setRevision(updated.revision);
+      } catch (err) {
+        console.warn('Failed to update session locale on backend, updating local state', err);
+        setSession((prev) => (prev ? { ...prev, locale: nextLocale } : prev));
+      }
+    },
+    [session]
+  );
+
   const updateField = useCallback(
-    async (fieldId: string, value: string | number | null, source: 'manual' = 'manual') => {
+    async (fieldId: string, value: string | number | null, source: 'manual' | 'voice' = 'manual') => {
       // Normalize strict integer for year_of_study
       const cleanValue =
         fieldId === 'year_of_study' && value !== null && value !== ''
@@ -547,7 +571,7 @@ export function useFormSession(initialSchema?: FormSchema | null) {
   );
 
   const batchUpdateValues = useCallback(
-    async (newValues: Record<string, string | number | null>) => {
+    async (newValues: Record<string, string | number | null>, source: 'manual' | 'voice' = 'voice') => {
       const nextValues = { ...values, ...newValues };
       setValues(nextValues);
 
@@ -568,12 +592,12 @@ export function useFormSession(initialSchema?: FormSchema | null) {
         return;
       }
 
-      // Online backend session
+      // Online backend session: patch with voice provenance so fields are confirmed and remain voice-correctable
       try {
         for (const [key, val] of Object.entries(newValues)) {
           if (val !== undefined && val !== null && String(val).trim() !== '') {
             const cleanVal = key === 'year_of_study' ? parseInt(String(val), 10) : val;
-            await api.patchField(session.session_id, key, cleanVal, 'manual').catch(() => {});
+            await api.patchField(session.session_id, key, cleanVal, source).catch(() => {});
           }
         }
         const review = await api.getReview(session.session_id);
@@ -672,6 +696,7 @@ export function useFormSession(initialSchema?: FormSchema | null) {
     error,
     confirmation,
     initSession,
+    switchLocale,
     updateField,
     batchUpdateValues,
     fetchReview,

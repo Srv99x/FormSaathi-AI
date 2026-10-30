@@ -403,3 +403,75 @@ export function createBlankForm(id = `form_${Date.now()}`): FormSchema {
   };
 }
 
+
+
+/**
+ * Converts frontend FormSchema into standard JSON Schema object conforming to
+ * backend registry.py validate_custom_schema
+ */
+export function formSchemaToJsonSchema(form: FormSchema): Record<string, any> {
+  const properties: Record<string, any> = {};
+  const required: string[] = [];
+
+  form.fields.forEach((field) => {
+    const fieldId = field.id.replace(/[^A-Za-z0-9_]/g, '_');
+    const prop: Record<string, any> = {
+      title: field.label || fieldId,
+    };
+
+    switch (field.type) {
+      case 'integer':
+        prop.type = 'integer';
+        if (field.minimum !== undefined) prop.minimum = field.minimum;
+        if (field.maximum !== undefined) prop.maximum = field.maximum;
+        break;
+      case 'date':
+        prop.type = 'string';
+        prop.format = 'date';
+        break;
+      case 'email':
+        prop.type = ['string', 'null'];
+        prop.format = 'email';
+        if (field.maxLength) prop.maxLength = field.maxLength;
+        break;
+      case 'tel':
+        prop.type = 'string';
+        prop.pattern = '^[6-9][0-9]{9}$';
+        break;
+      case 'select':
+      case 'radio':
+        prop.type = 'string';
+        if (field.options && field.options.length > 0) {
+          prop.enum = [...field.options];
+          if (field.hasOtherOption && !prop.enum.some((o: string) => o.toLowerCase() === 'other')) {
+            prop.enum.push('Other');
+          }
+        }
+        break;
+      case 'textarea':
+        prop.type = 'string';
+        prop.maxLength = field.maxLength || 250;
+        break;
+      default:
+        prop.type = 'string';
+        if (field.minLength) prop.minLength = field.minLength;
+        if (field.maxLength) prop.maxLength = field.maxLength;
+        break;
+    }
+
+    properties[fieldId] = prop;
+    if (field.required) {
+      required.push(fieldId);
+    }
+  });
+
+  return {
+    $id: form.id.replace(/[^A-Za-z0-9_\-\.]/g, '_'),
+    title: form.title || 'Untitled Form',
+    description: form.description || '',
+    type: 'object',
+    additionalProperties: false,
+    properties,
+    required,
+  };
+}

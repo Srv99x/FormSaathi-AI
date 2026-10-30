@@ -6,12 +6,14 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import { FormField, FormSchema, FormSettings } from '../types/form';
+import { api } from '../services/api';
 import {
   BUILTIN_STUDENT_REGISTRATION,
   BUILTIN_STUDENT_ASSISTANCE,
   createBlankForm,
   saveCustomForm,
   getCustomForm,
+  formSchemaToJsonSchema,
 } from '../services/schemaMapper';
 import { Header } from '../components/common/Header';
 import { Button } from '../components/common/Button';
@@ -38,11 +40,19 @@ export const FormBuilderPage: React.FC = () => {
   const [isPublishOpen, setIsPublishOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Auto-save active draft under dedicated storage key while keeping form.id intact
+  // Auto-save active draft under dedicated storage key and sync with backend registry
   useEffect(() => {
     saveCustomForm(form, 'active_draft');
     if (form.id && form.id !== 'active_draft') {
       saveCustomForm(form, form.id);
+      if (!['student_registration_v1', 'student_assistance_v1'].includes(form.id)) {
+        try {
+          const jsonSchema = formSchemaToJsonSchema(form);
+          api.registerForm(jsonSchema).catch(() => {});
+        } catch {
+          // ignore transient incomplete schema while typing
+        }
+      }
     }
   }, [form]);
 

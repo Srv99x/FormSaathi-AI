@@ -15,6 +15,7 @@ Render hosts the Python FastAPI application with automated health checks and env
 4. Supply your secret keys when prompted:
    - `SARVAM_API_KEY`: Your Sarvam AI key (speech-to-text)
    - `GROQ_API_KEY`: Your Groq Cloud API key (LLM entity extraction)
+   - `GROQ_MODEL`: Set to `llama-3.3-70b-versatile`
 5. Click **Apply**. Render will build and deploy the web service.
 
 ### Option B: Manual Web Service Setup
@@ -31,6 +32,7 @@ Render hosts the Python FastAPI application with automated health checks and env
 4. Under **Environment Variables**, add:
    - `PYTHON_VERSION`: `3.12.9`
    - `CORS_ORIGINS`: `https://*.vercel.app,http://localhost:5173` (or `*`)
+   - `GROQ_MODEL`: `llama-3.3-70b-versatile`
    - `SARVAM_API_KEY`: *(your Sarvam API key)*
    - `GROQ_API_KEY`: *(your Groq API key)*
 5. Click **Create Web Service**.
@@ -63,6 +65,7 @@ Vercel hosts the React Single-Page Application (SPA) with automated build optimi
 1. **Verify Backend Health**:
    ```bash
    curl https://<your-render-app>.onrender.com/api/health
+   curl https://<your-render-app>.onrender.com/health
    ```
    Expected response:
    ```json
@@ -71,7 +74,7 @@ Vercel hosts the React Single-Page Application (SPA) with automated build optimi
 
 2. **Verify Frontend**:
    - Open your Vercel URL in a desktop or mobile browser.
-   - Navigate to `/form/student_registration_v1`.
+   - Navigate to `/fill/student_registration_v1`.
    - Test clicking the voice assistant button on the bottom right corner.
    - Verify speech recording and form auto-filling interact smoothly with the Render backend.
 
@@ -83,6 +86,7 @@ Both services remain fully functional for local development:
 - **Backend**:
   ```powershell
   Set-Location backend
+  $env:PYTHONPATH="."
   .venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
   ```
 - **Frontend**:
@@ -91,4 +95,3 @@ Both services remain fully functional for local development:
   npm run dev
   ```
   Vite's proxy routes `/api` directly to `127.0.0.1:8000`.
-

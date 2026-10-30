@@ -79,16 +79,19 @@ class AIService:
             try:
                 stt_result = await self.transcribe_speech(audio_bytes, filename or "audio.webm", locale)
                 user_text = (stt_result.transcript or "").strip()
+            except APIError:
+                # Re-raise genuine APIErrors (auth failure, timeouts, unsupported codec, audio limits)
+                raise
             except Exception:
                 user_text = ""
 
-        # If audio was sent but nothing was transcribed (silence/noise)
+        # If audio was sent but nothing was transcribed (genuine silence / quiet background noise)
         if audio_provided and not user_text:
             if locale == "hi-IN":
                 clarify_msg = "माफ़ कीजिए, मुझे आपकी आवाज़ साफ़ सुनाई नहीं दी। कृपया दोबारा बोलें।"
             else:
                 clarify_msg = "Sorry, I couldn't hear that clearly. Could you please repeat?"
-            
+
             speaker = "aditya" if locale == "hi-IN" else "priya"
             audio_base64 = await self.sarvam.synthesize(clarify_msg, language_code=locale, speaker=speaker) if self.sarvam.is_configured else None
             return {

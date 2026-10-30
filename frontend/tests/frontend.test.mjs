@@ -96,8 +96,8 @@ test('API client contract conformance: PATCH uses strict source: "manual"', () =
   const apiPath = path.resolve(__dirname, '../src/services/api.ts');
   const apiContent = fs.readFileSync(apiPath, 'utf8');
 
-  // Must ensure source is 'manual' per backend ManualChange model
-  assert.ok(apiContent.includes("source: 'manual' = 'manual'"));
+  // Must ensure source defaults to 'manual' per backend ManualChange model
+  assert.ok(apiContent.includes("source: 'manual' = 'manual'") || apiContent.includes("source: 'manual' | 'voice' = 'manual'"));
   assert.ok(apiContent.includes("body: JSON.stringify({ field_id: fieldId, value, source })"));
 });
 
@@ -107,6 +107,7 @@ test('ConfirmSession payload conformance: reviewed=true and revision integer', (
 
   assert.ok(apiContent.includes("body: JSON.stringify({ reviewed: true, revision })"));
 });
+
 test('AssistantTurnResponse type includes additive issues array conforming to Issue contract', () => {
   const voiceTypesPath = path.resolve(__dirname, '../src/types/voice.ts');
   const content = fs.readFileSync(voiceTypesPath, 'utf8');

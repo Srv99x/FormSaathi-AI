@@ -28,10 +28,12 @@ class Session:
     revision: int = 0
     values: dict = field(default_factory=dict)
     manual_fields: set = field(default_factory=set)
+    voice_fields: set = field(default_factory=set)
     conflicts: dict = field(default_factory=dict)
     reviewed_revision: int | None = None
     confirmed_revision: int | None = None
     confirmation: dict | None = None
+    schema: dict | None = None
 
     def changed(self):
         self.revision += 1
@@ -51,16 +53,24 @@ class SessionStore:
         for sid in [sid for sid, session in self.sessions.items() if session.expires_at <= now]:
             del self.sessions[sid]
 
-    def create(self, form_id: str, locale: str) -> Session:
+    def create(self, form_id: str, locale: str, custom_schema: dict | None = None) -> Session:
         require_locale(locale)
+        if custom_schema:
+            from app.schemas.registry import register_form
+            register_form(custom_schema)
         schema = get_form(form_id)
         if schema is None:
             raise APIError(404, "FORM_NOT_FOUND", "This form is not available.")
         with self.lock:
             self.purge()
-            session = Session(secrets.token_urlsafe(32), form_id, locale,
-                              self.clock() + TTL_SECONDS,
-                              values=dict.fromkeys(schema["properties"]))
+            session = Session(
+                secrets.token_urlsafe(32),
+                form_id,
+                locale,
+                self.clock() + TTL_SECONDS,
+                values=dict.fromkeys(schema["properties"]),
+                schema=deepcopy(schema),
+            )
             self.sessions[session.session_id] = session
             return session
 
@@ -85,7 +95,7 @@ def require_fields(session: Session, ids):
 
 
 def snapshot(session: Session) -> dict:
-    schema = get_form(session.form_id)
+    schema = session.schema or get_form(session.form_id)
     values, statuses, messages = {}, {}, {}
     missing, invalid, conflicts = [], [], []
     for field_id, spec in schema["properties"].items():
@@ -102,7 +112,12 @@ def snapshot(session: Session) -> dict:
             status, message = "conflict", "Different values were proposed. Please choose or enter the correct value."
             conflicts.append({"field_id": field_id, "type": "conflict", "message": message,
                               "candidates": deepcopy(session.conflicts[field_id])})
-        elif status == "valid" and field_id not in session.manual_fields:
+        elif (
+            status == "valid"
+            and field_id not in session.manual_fields
+            and field_id not in session.voice_fields
+            and session.values[field_id] is not None
+        ):
             status, message = "needs_review", "Please check this proposed value and acknowledge it with a manual correction."
         statuses[field_id], messages[field_id] = status, message
     return {"values": values, "statuses": statuses, "messages": messages,
@@ -113,7 +128,7 @@ def snapshot(session: Session) -> dict:
 
 def propose(session: Session, proposed_values: dict):
     require_fields(session, proposed_values)
-    schema = get_form(session.form_id)
+    schema = session.schema or get_form(session.form_id)
     for field_id, value in proposed_values.items():
         old = session.values[field_id]
         spec = schema["properties"][field_id]
@@ -129,12 +144,30 @@ def propose(session: Session, proposed_values: dict):
         session.changed()
 
 
-def correct(session: Session, field_id: str, value):
+def patch_field(session: Session, field_id: str, value, source: str = "manual"):
     require_fields(session, [field_id])
-    session.values[field_id] = value
-    session.manual_fields.add(field_id)
-    session.conflicts.pop(field_id, None)
-    session.changed()
+    if source == "voice":
+        if field_id in session.manual_fields:
+            raise APIError(
+                409,
+                "MANUAL_OVERRIDE_PROTECTED",
+                f"'{field_id}' has been manually corrected; voice update rejected to preserve user edit.",
+                field_id=field_id,
+            )
+        session.values[field_id] = value
+        session.voice_fields.add(field_id)
+        session.conflicts.pop(field_id, None)
+        session.changed()
+    else:
+        session.values[field_id] = value
+        session.manual_fields.add(field_id)
+        session.voice_fields.discard(field_id)
+        session.conflicts.pop(field_id, None)
+        session.changed()
+
+
+def correct(session: Session, field_id: str, value):
+    patch_field(session, field_id, value, source="manual")
 
 
 def confirm(session: Session, reviewed: bool, revision: int):

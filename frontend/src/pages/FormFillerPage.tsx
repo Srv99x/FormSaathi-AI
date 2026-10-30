@@ -34,6 +34,7 @@ export const FormFillerPage: React.FC = () => {
     canConfirm,
     confirmation,
     initSession,
+    switchLocale,
     updateField,
     batchUpdateValues,
     confirmLocal,
@@ -107,7 +108,7 @@ export const FormFillerPage: React.FC = () => {
     currentValues: values,
     enableBargeIn: formSchema?.settings?.enableBargeIn ?? true,
     onValuesExtracted: (newVals) => {
-      batchUpdateValues(newVals);
+      batchUpdateValues(newVals, 'voice');
       Object.keys(newVals).forEach((k) => triggerFieldPulse(k));
       setToastMessage('Voice assistant updated form fields');
     },
@@ -116,11 +117,11 @@ export const FormFillerPage: React.FC = () => {
     },
   });
 
-  const handleToggleLocale = () => {
+  const handleToggleLocale = async () => {
     const nextLocale = locale === 'en-IN' ? 'hi-IN' : 'en-IN';
     setLocale(nextLocale);
     if (session) {
-      initSession(formId, nextLocale, formSchema);
+      await switchLocale(nextLocale);
     }
   };
 

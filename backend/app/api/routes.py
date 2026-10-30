@@ -2,12 +2,13 @@ import json
 from fastapi import APIRouter, Request, Response
 from app.ai import ai_service
 from app.models.contracts import (ConfirmRequest, ConfirmationResponse, CreateSession,
-    ExtractionRequest, ExtractionResponse, ManualChange, PatchResponse, ReviewResponse,
-    SessionResponse, SpeechResponse, ValidateRequest, ValidationResponse)
-from app.schemas.registry import get_form, list_forms
+    ExtractionRequest, ExtractionResponse, ManualChange, PatchResponse, RegisterFormRequest,
+    ReviewResponse, SessionDetailsResponse, SessionResponse, SpeechResponse, UpdateLocaleRequest,
+    ValidateRequest, ValidationResponse)
+from app.schemas.registry import get_form, list_forms, register_form
 from app.services.ai_adapter import apply_field_mapping
 from app.services.errors import APIError
-from app.services.session_service import (TTL_SECONDS, confirm, correct, propose,
+from app.services.session_service import (TTL_SECONDS, confirm, patch_field, propose,
                                          require_locale, snapshot)
 
 router = APIRouter(prefix="/api")
@@ -23,22 +24,56 @@ def forms():
     return {"forms": list_forms()}
 
 
+@router.post("/forms", status_code=201)
+def create_custom_form(body: RegisterFormRequest):
+    reg = register_form(body.schema_definition)
+    return {"form_id": reg["$id"], "title": reg["title"], "status": "registered"}
+
+
 @router.get("/forms/{form_id}")
 def form(form_id: str):
     schema = get_form(form_id)
     if schema is None:
         raise APIError(404, "FORM_NOT_FOUND", "This form is not available.")
-    return {"form_id": form_id, "title": schema["title"], "description": schema["description"],
-            "fields": [{"field_id": key, "label": spec["title"],
-                        "required": key in schema["required"], **spec}
+    return {"form_id": form_id, "title": schema["title"], "description": schema.get("description", ""),
+            "fields": [{"field_id": key, "label": spec.get("title", key),
+                        "required": key in schema.get("required", []), **spec}
                        for key, spec in schema["properties"].items()]}
 
 
 @router.post("/sessions", status_code=201, response_model=SessionResponse)
 def create_session(body: CreateSession, request: Request):
-    session = request.app.state.sessions.create(body.form_id, body.locale)
+    session = request.app.state.sessions.create(body.form_id, body.locale, body.custom_schema)
     return {"session_id": session.session_id, "form_id": session.form_id,
             "revision": session.revision, "expires_in_seconds": TTL_SECONDS}
+
+
+@router.get("/sessions/{sid}", response_model=SessionDetailsResponse)
+def get_session(sid: str, request: Request):
+    with request.app.state.sessions.access(sid) as session:
+        remaining_ttl = max(0, int(session.expires_at - request.app.state.sessions.clock()))
+        return {
+            "session_id": session.session_id,
+            "form_id": session.form_id,
+            "locale": session.locale,
+            "revision": session.revision,
+            "expires_in_seconds": remaining_ttl,
+            "values": session.values,
+        }
+
+
+@router.patch("/sessions/{sid}/locale", response_model=SessionResponse)
+def update_session_locale(sid: str, body: UpdateLocaleRequest, request: Request):
+    require_locale(body.locale)
+    with request.app.state.sessions.access(sid) as session:
+        session.locale = body.locale
+        session.changed()
+        return {
+            "session_id": session.session_id,
+            "form_id": session.form_id,
+            "revision": session.revision,
+            "expires_in_seconds": TTL_SECONDS,
+        }
 
 
 @router.post("/sessions/{sid}/validate", response_model=ValidationResponse)
@@ -51,7 +86,7 @@ def validate(sid: str, body: ValidateRequest, request: Request):
 @router.patch("/sessions/{sid}/fields", response_model=PatchResponse)
 def fields(sid: str, body: ManualChange, request: Request):
     with request.app.state.sessions.access(sid) as session:
-        correct(session, body.field_id, body.value)
+        patch_field(session, body.field_id, body.value, body.source)
         result = snapshot(session)
         return {"revision": session.revision, "status": result["statuses"][body.field_id],
                 "field": {"field_id": body.field_id,

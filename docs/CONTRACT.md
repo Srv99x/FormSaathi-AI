@@ -1,6 +1,6 @@
 # FormSaathi AI — Canonical API & Domain Contract (CONTRACT.md)
 
-**Document Version:** 2.0.0 (Production Verified)  
+**Document Version:** 2.1.0 (Production Remediated)
 **Authority:** Original PRD (FormSaathi_AI_Editable_Report.md A6/A13) for domain fields; Master Development Playbook for architecture and endpoints; `AGENTS.md` for team ownership.
 
 ---
@@ -11,7 +11,7 @@
 - **Frontend Experience & Audio Capture (Akash Kalita):** `frontend/` single-page application, microphone audio capture with voice activity detection, voice orb interface, visual form builder, and local state management.
 - **Designated AI Requirements:**
   - Speech-to-Text: Sarvam Saaras v4 (`saaras:v4`).
-  - Structured Conversational Agent & Extraction: Groq Llama 3.3 70B Versatile.
+  - Structured Conversational Agent & Extraction: Groq OpenAI GPT-OSS 120B (`openai/gpt-oss-120b`), with automatic dual-model fallback to OpenAI GPT-OSS 20B (`openai/gpt-oss-20b`).
   - Text-to-Speech Voice Synthesis: Sarvam Bulbul v3 (`bulbul:v3`).
 - **Locales:** English (`en-IN`) and Hindi (`hi-IN`). Assamese (`as-IN`) is experimental and rejected on session creation.
 
@@ -25,6 +25,9 @@ Schemas in `backend/app/schemas/forms/` represent the canonical source of truth:
 |:---|:---|:---|
 | `student_registration_v1` | `full_name`, `date_of_birth`, `mobile`, `city`, `state`, `programme` | `email`, `institution`, `guardian_name`, `preferred_language` |
 | `student_assistance_v1` | `full_name`, `date_of_birth`, `mobile`, `institution`, `programme`, `year_of_study`, `city`, `state`, `assistance_type` | `email`, `support_reason` |
+
+### Custom Schemas
+Custom schemas can be dynamically registered via `POST /api/forms` or passed inline to `POST /api/sessions`. Custom schemas must include a valid `$id`, `title`, and `properties` object (1 to 50 properties, max 64 KB payload). The in-memory registry is bounded to 100 schemas with LRU eviction.
 
 ### Allowed Enumerations
 - **`state`**: `Assam`, `Manipur`, `Meghalaya`, `Tripura`, `Arunachal Pradesh`, `Nagaland`, `Mizoram`, `Other Indian State/UT`.
@@ -51,20 +54,27 @@ All API routes are served under `/api` (or root health `/health`).
 
 | Method & Route | Request Payload | Success Response | Status |
 |:---|:---|:---|:---|
+| `GET /health` | — | `{"status": "ok", "service": "formsaathi-backend", "version": "1.0.0"}` | `200` |
 | `GET /api/health` | — | `{"status": "ok", "speech_provider": "available", "extraction_provider": "available"}` | `200` |
 | `GET /api/forms` | — | `{"forms": [{"id": str, "title": str, "description": str}]}` | `200` |
+| `POST /api/forms` | `{"schema": {...}}` | `{"form_id": str, "title": str, "fields": [...]}` | `201` |
 | `GET /api/forms/{form_id}` | — | `{"form_id": str, "title": str, "description": str, "fields": [...]}` | `200` |
-| `POST /api/sessions` | `{"form_id": str, "locale": "en-IN" \| "hi-IN"}` | `{"session_id": str, "form_id": str, "revision": 0, "expires_in_seconds": 3600}` | `201` |
-| `GET /api/sessions/{sid}` | — | `{"session_id": str, "form_id": str, "locale": str, "values": {...}, "revision": int}` | `200` |
+| `POST /api/sessions` | `{"form_id": str, "locale": "en-IN" \| "hi-IN", "custom_schema"?: {...}}` | `{"session_id": str, "form_id": str, "revision": 0, "expires_in_seconds": 3600}` | `201` |
+| `GET /api/sessions/{sid}` | — | `{"session_id": str, "form_id": str, "locale": str, "revision": int, "created_at": float, "expires_in_seconds": int, "status": str, "values": {...}, "field_statuses": {...}}` | `200` |
+| `PATCH /api/sessions/{sid}/locale` | `{"locale": "en-IN" \| "hi-IN"}` | `{"session_id": str, "locale": str, "revision": int}` | `200` |
 | `PATCH /api/sessions/{sid}/fields` | `{"field_id": str, "value": any, "source": "manual" \| "voice"}` | `{"revision": int, "field": {"field_id": str, "value": any, "status": str, "message": str}}` | `200` |
 | `POST /api/sessions/{sid}/validate` | `{"proposed_values": {field_id: value}}` | `{"values": {...}, "statuses": {...}, "missing": [...], "invalid": [...], "can_confirm": bool}` | `200` |
 | `GET /api/sessions/{sid}/review` | — | `{"values": {...}, "field_statuses": {...}, "missing": [...], "invalid": [...], "can_confirm": bool, "revision": int}` | `200` |
 | `POST /api/sessions/{sid}/confirm` | `{"reviewed": true, "revision": int}` | `{"confirmation_id": str, "status": "confirmed_local", "form_id": str, "revision": int, "confirmed_at": str, "record": {...}}` | `200` |
 | `DELETE /api/sessions/{sid}` | — | Empty body | `204` |
 
+### 3.2 Field Modification Provenance (`source`)
+- When a user enters data manually via input components, the client transmits `source: "manual"`. The field is added to `session.manual_fields` and protected from subsequent accidental voice overwrites. Attempting to overwrite a manual field via voice returns `409 MANUAL_OVERRIDE_PROTECTED`.
+- When data is extracted from speech during the voice call, the client transmits `source: "voice"`. The field is stored in `session.voice_fields` and marked `"valid"` for confirmation, while remaining open to iterative voice corrections.
+
 ---
 
-### 3.2 AI & Conversational Voice Endpoints
+### 3.3 AI & Conversational Voice Endpoints
 
 #### POST `/api/sessions/{sid}/assistant`
 The unified conversational turn endpoint. Accepts either `multipart/form-data` with an audio file or JSON with a text transcript.

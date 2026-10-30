@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
+from app.ai import ai_service
 from app.api.routes import router
 from app.services.errors import APIError
 from app.services.session_service import SessionStore
@@ -39,9 +40,11 @@ def create_app(store: SessionStore | None = None) -> FastAPI:
         "http://127.0.0.1:8000",
         "null",
     ]
+    allow_creds = True
     if cors_env:
         if cors_env.strip() == "*":
             allowed_origins = ["*"]
+            allow_creds = False
         else:
             for origin in cors_env.split(","):
                 cleaned = origin.strip()
@@ -52,7 +55,7 @@ def create_app(store: SessionStore | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_origin_regex=r"https://.*\.vercel\.app" if allowed_origins != ["*"] else None,
-        allow_credentials=True,
+        allow_credentials=allow_creds,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
@@ -78,6 +81,10 @@ def create_app(store: SessionStore | None = None) -> FastAPI:
             "docs": "/docs",
             "health": "/api/health"
         }
+
+    @application.get("/health", include_in_schema=False)
+    async def health_root():
+        return {"status": "ok", **ai_service.status()}
 
     application.include_router(router)
     return application

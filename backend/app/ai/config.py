@@ -54,6 +54,10 @@ class AIConfig:
         return os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
     @property
+    def GROQ_FALLBACK_MODEL(self) -> str:
+        return os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")
+
+    @property
     def GROQ_BASE_URL(self) -> str:
         return os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 

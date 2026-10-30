@@ -2881,11 +2881,47 @@ body {
 
 @media (max-width: 768px) {
   .fs-header {
-    padding: 0 16px;
+    padding: 0 14px;
   }
 
   .fs-header-form-title {
     display: none;
+  }
+
+  .fs-brand-tagline {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .fs-header {
+    padding: 0 10px;
+  }
+
+  .fs-header-left {
+    gap: 8px;
+  }
+
+  .fs-header-right {
+    gap: 6px;
+  }
+
+  .fs-status-pill .fs-status-text {
+    display: none;
+  }
+
+  .fs-status-pill {
+    padding: 6px 8px;
+    border-radius: var(--radius-full);
+  }
+
+  .fs-header-action-btn span {
+    display: none;
+  }
+
+  .fs-header-action-btn {
+    padding: 6px 10px;
+    min-height: 36px;
   }
 
   .fs-builder-subbar {
@@ -3042,4 +3078,50 @@ body {
   background: #e2e8f0;
   color: #0f172a;
   transform: translateY(-1px);
+}
+
+
+/* ==========================================================================
+   Mobile & Touch Target Polish (F-013)
+   ========================================================================== */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+button, input, select, textarea {
+  touch-action: manipulation;
+}
+
+@media (max-width: 768px) {
+  .fs-filler-main {
+    padding: 16px 12px max(200px, calc(160px + env(safe-area-inset-bottom))) 12px;
+  }
+
+  .fs-filler-container {
+    max-width: 100%;
+    padding: 0 4px;
+  }
+
+  .fs-voice-widget-card {
+    right: 12px;
+    left: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: auto;
+    max-width: calc(100vw - 24px);
+    border-radius: 20px;
+  }
+
+  .fs-voice-fab-wrap {
+    right: 16px;
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .fs-btn,
+  .fs-circle-btn,
+  .fs-widget-icon-btn,
+  .fs-back-btn,
+  .fs-template-btn {
+    min-height: 44px;
+  }
 }

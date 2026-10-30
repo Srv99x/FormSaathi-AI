@@ -6,8 +6,8 @@
 
 Developed by **teamRedFlagggs** for Ecclesia 4.0
 
-[![Frontend Tests](https://img.shields.io/badge/Frontend_Tests-26%20Passed-22c55e?style=flat-square)](https://github.com)
-[![Backend Tests](https://img.shields.io/badge/Backend_Tests-99%20Passed-22c55e?style=flat-square)](https://github.com)
+[![Frontend Tests](https://img.shields.io/badge/Frontend_Tests-31%20Passed-22c55e?style=flat-square)](https://github.com)
+[![Backend Tests](https://img.shields.io/badge/Backend_Tests-138%20Passed-22c55e?style=flat-square)](https://github.com)
 [![Python Version](https://img.shields.io/badge/Python-3.12.9-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18.3-20232A?style=flat-square&logo=react&logoColor=61DAFB)](https://react.dev)
@@ -55,7 +55,7 @@ The application is deployed across dedicated high-availability infrastructure:
 - **React 18 & TypeScript**: Component-driven UI with strong compile-time type guarantees.
 - **Vite**: Optimized build tooling and instant hot-module replacement.
 - **Tailwind CSS**: Utility-first styling with responsive, accessible layouts and dark/light themes.
-- **Web Audio API**: Real-time microphone capture with Voice Activity Detection (VAD) and automatic silence cutoff (1.35s threshold).
+- **Web Audio API**: Real-time microphone capture with Voice Activity Detection (VAD), silence cutoff (1.5s threshold), and 25s maximum recording buffer.
 - **HTML5 Audio Pipeline**: Pure native audio playback eliminating browser speech synthesis discrepancies.
 
 ### Backend & AI Pipeline
@@ -63,12 +63,12 @@ The application is deployed across dedicated high-availability infrastructure:
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![Uvicorn](https://img.shields.io/badge/Uvicorn-499848?style=for-the-badge&logo=gunicorn&logoColor=white)
 ![Pydantic](https://img.shields.io/badge/Pydantic_v2-E92063?style=for-the-badge&logo=pydantic&logoColor=white)
-![Groq](https://img.shields.io/badge/Groq_Llama_3.3-F55036?style=for-the-badge&logo=meta&logoColor=white)
+![Groq](https://img.shields.io/badge/Groq_GPT_OSS_120B-F55036?style=for-the-badge&logo=meta&logoColor=white)
 
 - **FastAPI & Uvicorn**: High-throughput asynchronous REST backend with automated OpenAPI generation.
 - **Pydantic v2**: Strict request, response, and domain contract enforcement.
 - **Sarvam AI (Saaras v4)**: High-accuracy Automatic Speech Recognition (ASR) tuned for Indian accents and codeswitching.
-- **Groq (Llama 3.3 70B Versatile)**: Context-aware conversational dialogue and structured entity extraction.
+- **Groq (OpenAI GPT-OSS 120B / GPT-OSS 20B Fallback)**: Context-aware conversational dialogue and structured entity extraction.
 - **Sarvam AI (Bulbul v3)**: Natural neural text-to-speech synthesis generating responsive WAV audio streams.
 
 ### Deployment & Tooling
@@ -111,7 +111,7 @@ FormSaathi AI executes an end-to-end hands-free loop:
 
 ### Pure Voice Pipeline Guarantees
 1. **Speech-Text-LLM-Text-Speech**: Seamless conversational loop. All speech output is synthesized through Sarvam Bulbul neural TTS. Browser `window.speechSynthesis` has been completely removed to eliminate synthetic robotic artifacts and concurrent voice conflicts.
-2. **Automated Hands-Free Flow**: Built-in silence detection (energy threshold 14, 1350ms window) automatically finalizes recordings when the user stops speaking.
+2. **Automated Hands-Free Flow**: Built-in silence detection (energy threshold 20, 1500ms window, 25s max clip) automatically finalizes recordings when the user stops speaking.
 3. **Form Context Awareness**: When opened, the assistant dynamically scans the current form, acknowledges filled fields, and specifically prompts the user for remaining required entries.
 4. **Editable Manual Override**: Manual edits are tracked with `source: manual` flags. The AI model respects user-entered values and does not silently overwrite corrected fields.
 
@@ -119,7 +119,7 @@ FormSaathi AI executes an end-to-end hands-free loop:
 
 ## Core Capabilities
 
-- **Strict Schema Compliance**: Implements verified production schemas (`student_registration_v1` and `student_assistance_v1`) with zero field inventions.
+- **Strict Schema Compliance**: Implements verified production schemas (`student_registration_v1` and `student_assistance_v1`) as well as dynamic custom form schemas with zero field inventions.
 - **Bilingual Operation**: Full support for Indian English (`en-IN`) and Hindi (`hi-IN`). Assamese (`as-IN`) is retained as an experimental tier.
 - **Dual Form Experience**:
   - **Live Form Filler**: Interactive form interface with live field validation, audio recorder, and collapsible voice orb widget.
@@ -136,15 +136,20 @@ The backend exposes a clean REST API documented via OpenAPI:
 
 | Method | Endpoint | Description |
 |:---|:---|:---|
-| `GET` | `/health` | Healthcheck and provider configuration status |
-| `POST` | `/api/sessions` | Create a new form session (`form_id`, `locale`) |
+| `GET` | `/health` | Root healthcheck and version status |
+| `GET` | `/api/health` | Provider health and connectivity status |
+| `GET` | `/api/forms` | List all available built-in and registered custom forms |
+| `POST` | `/api/forms` | Register a new custom form schema dynamically |
+| `GET` | `/api/forms/{form_id}` | Retrieve form schema definition |
+| `POST` | `/api/sessions` | Create a new form session (`form_id`, `locale`, optional `custom_schema`) |
 | `GET` | `/api/sessions/{sid}` | Retrieve session state, values, revision, and status |
+| `PATCH` | `/api/sessions/{sid}/locale` | Update session locale in-place without resetting form data |
 | `PATCH` | `/api/sessions/{sid}/fields` | Apply field updates (`values`, `source: manual\|voice`) |
 | `POST` | `/api/sessions/{sid}/speech` | Raw speech-to-text audio upload (`Sarvam Saaras v4`) |
 | `POST` | `/api/sessions/{sid}/extract` | Extract candidate entities from text transcripts |
 | `POST` | `/api/sessions/{sid}/assistant` | Unified conversational voice turn (Audio/Text -> LLM -> Bulbul TTS) |
 | `POST` | `/api/tts` | Dedicated text-to-speech synthesis endpoint (`Sarvam Bulbul`) |
-| `POST` | `/api/sessions/{sid}/review` | Request validation summary and review token for current revision |
+| `GET` | `/api/sessions/{sid}/review` | Request validation summary and review token for current revision |
 | `POST` | `/api/sessions/{sid}/confirm` | Finalize session into `confirmed_local` state |
 | `DELETE` | `/api/sessions/{sid}` | Explicitly purge session from memory |
 
@@ -214,16 +219,16 @@ Open `http://localhost:5173` in your browser.
 
 The repository contains automated test suites covering backend validation contracts, session lifecycles, entity extraction, and frontend schema conformance.
 
-### Run Backend Tests (99 tests)
+### Run Backend Tests (138 tests)
 ```bash
 # Run from backend directory
 cd backend
 .venv\Scripts\python.exe -m pytest -q    # Windows
 pytest -q                                # macOS / Linux
 ```
-*Tests pass with 99 verified test cases across unit, contract, and integration layers.*
+*Tests pass with 138 verified test cases across unit, contract, and integration layers.*
 
-### Run Frontend Tests (26 tests)
+### Run Frontend Tests (31 tests)
 ```bash
 # From frontend directory
 cd frontend

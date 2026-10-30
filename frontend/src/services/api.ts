@@ -83,6 +83,19 @@ class ApiService {
     return data.forms || [];
   }
 
+  async registerForm(schemaDefinition: any): Promise<any> {
+    const res = await fetch(`${this.baseUrl}/forms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schema_definition: schemaDefinition }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new ApiError(err?.error?.message || `Failed to register form (HTTP ${res.status})`, res.status, err?.error?.code, err);
+    }
+    return await res.json();
+  }
+
   async getForm(formId: string): Promise<any> {
     const res = await fetch(`${this.baseUrl}/forms/${encodeURIComponent(formId)}`);
     if (!res.ok) {
@@ -92,15 +105,49 @@ class ApiService {
     return await res.json();
   }
 
-  async createSession(formId: string, locale: 'en-IN' | 'hi-IN'): Promise<SessionData> {
+  async createSession(
+    formId: string,
+    locale: 'en-IN' | 'hi-IN',
+    customSchema?: any
+  ): Promise<SessionData> {
+    const payload: Record<string, any> = { form_id: formId, locale };
+    if (customSchema) {
+      payload.custom_schema = customSchema;
+    }
     const res = await fetch(`${this.baseUrl}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ form_id: formId, locale }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new ApiError(err?.error?.message || `Failed to create session (HTTP ${res.status})`, res.status, err?.error?.code, err);
+    }
+    const data = await res.json();
+    return { ...data, locale };
+  }
+
+  async getSession(sessionId: string): Promise<any> {
+    const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new ApiError(err?.error?.message || `Failed to get session (HTTP ${res.status})`, res.status, err?.error?.code, err);
+    }
+    return await res.json();
+  }
+
+  async updateSessionLocale(
+    sessionId: string,
+    locale: 'en-IN' | 'hi-IN'
+  ): Promise<SessionData> {
+    const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/locale`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locale }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new ApiError(err?.error?.message || `Failed to update locale (HTTP ${res.status})`, res.status, err?.error?.code, err);
     }
     const data = await res.json();
     return { ...data, locale };
@@ -126,7 +173,8 @@ class ApiService {
     sessionId: string,
     fieldId: string,
     value: string | number | null,
-    source: 'manual' = 'manual'
+    // source: 'manual' = 'manual'
+    source: 'manual' | 'voice' = 'manual'
   ): Promise<PatchResponse> {
     const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/fields`, {
       method: 'PATCH',

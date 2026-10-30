@@ -13,6 +13,7 @@ class Contract(BaseModel):
 class CreateSession(Contract):
     form_id: str
     locale: str
+    custom_schema: dict[str, Any] | None = None
 
 
 class ValidateRequest(Contract):
@@ -22,7 +23,15 @@ class ValidateRequest(Contract):
 class ManualChange(Contract):
     field_id: str
     value: Value
-    source: Literal["manual"]
+    source: Literal["manual", "voice"] = "manual"
+
+
+class UpdateLocaleRequest(Contract):
+    locale: str
+
+
+class RegisterFormRequest(Contract):
+    schema_definition: dict[str, Any]
 
 
 class ConfirmRequest(Contract):
@@ -67,6 +76,15 @@ class SessionResponse(Contract):
     form_id: str
     revision: int
     expires_in_seconds: int
+
+
+class SessionDetailsResponse(Contract):
+    session_id: str
+    form_id: str
+    locale: str
+    revision: int
+    expires_in_seconds: int
+    values: dict[str, Value]
 
 
 class ValidationResponse(Contract):

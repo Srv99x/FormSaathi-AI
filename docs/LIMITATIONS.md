@@ -24,7 +24,7 @@ This document provides a transparent, factual inventory of the architectural bou
 
 - **API Credentials Required**:
   - **Sarvam AI**: Required for Automatic Speech Recognition via Saaras v4 (`saaras:v4`) and Text-to-Speech synthesis via Bulbul v3 (`bulbul:v3`).
-  - **Groq Cloud**: Required for Llama 3.3 70B Versatile conversational guidance and structured entity extraction.
+  - **Groq Cloud**: Required for OpenAI GPT-OSS 120B (`openai/gpt-oss-120b`, with dual-model fallback to `openai/gpt-oss-20b`) conversational guidance and structured entity extraction.
 - **Rate Limits & Upstream Errors**: During network degradation or upstream vendor rate limits (HTTP 429), the API surfaces structured, retryable error codes (`EXTRACTION_TIMEOUT`, `AI_ASSISTANT_UNAVAILABLE`).
 - **Graceful Manual Fallback**: When AI keys are unconfigured or unavailable, form filling remains 100% accessible via manual keyboard and pointer inputs.
 
@@ -32,8 +32,8 @@ This document provides a transparent, factual inventory of the architectural bou
 
 ## 4. Audio Input & Synthesis Limits
 
-- **Payload Size & Duration**: Single audio recordings sent to `/api/sessions/{sid}/assistant` or `/api/sessions/{sid}/speech` must not exceed 10 MB and a maximum of 30 seconds of audio.
-- **Voice Activity Detection**: Browser-side VAD uses an energy threshold of 14 and a 1.35-second silence detection window. In high-background-noise environments, users may tap the explicit pause or stop controls.
+- **Payload Size & Duration**: Single audio recordings sent to `/api/sessions/{sid}/assistant` or `/api/sessions/{sid}/speech` must not exceed 10 MB and a maximum duration of 30.0 seconds (server-side duration enforced across WAV, WebM, and OGG formats with 413 AUDIO_TOO_LONG).
+- **Voice Activity Detection**: Browser-side VAD uses an energy threshold of 20, a 1.5-second silence detection window, and a 25-second maximum recording safety duration. In high-background-noise environments, users may tap the explicit pause or stop controls.
 - **Supported Codecs**: Audio capture relies on the host browser's `MediaRecorder` API (standard WebM Opus, WAV, OGG, or AAC).
 
 ---

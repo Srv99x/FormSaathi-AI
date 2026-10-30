@@ -12,7 +12,7 @@ This guide details how to install dependencies, run the backend and frontend loc
 - **Package Managers**: `pip` and `npm`
 - **API Keys** (optional for local mock/deterministic tests; required for live voice & AI extraction):
   - `SARVAM_API_KEY`: Sarvam AI platform key (Speech-to-Text via Saaras v4 and Text-to-Speech via Bulbul v3)
-  - `GROQ_API_KEY`: Groq Cloud key (Llama 3.3 70B Versatile for conversation and entity extraction)
+  - `GROQ_API_KEY`: Groq Cloud key (OpenAI GPT-OSS 120B (with fallback to OpenAI GPT-OSS 20B) for conversation and entity extraction)
 
 ---
 
@@ -30,8 +30,9 @@ backend\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
 # Configure environment variables
 Copy-Item backend/.env.example backend/.env
 
-# Run automated tests (99 tests)
+# Run automated tests (138 tests)
 Set-Location backend
+$env:PYTHONPATH="."
 .venv\Scripts\python.exe -m pytest -q
 
 # Start FastAPI server on port 8000
@@ -51,9 +52,9 @@ pip install -r backend/requirements.txt
 # Configure environment variables
 cp backend/.env.example backend/.env
 
-# Run automated tests (99 tests)
+# Run automated tests (138 tests)
 cd backend
-pytest -q
+PYTHONPATH=. pytest -q
 
 # Start FastAPI server on port 8000
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
@@ -61,6 +62,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
 ### Backend Verification
 - Interactive Swagger UI: `http://127.0.0.1:8000/docs`
+- Root Healthcheck: `http://127.0.0.1:8000/health`
 - Service Healthcheck: `http://127.0.0.1:8000/api/health`
 - Dynamic CORS: Automatically allows `http://localhost:5173`, `http://127.0.0.1:5173`, `https://*.vercel.app`, or any origins defined in `CORS_ORIGINS`.
 
@@ -77,7 +79,7 @@ npm install
 # Copy environment template
 cp .env.example .env
 
-# Run automated contract & UI tests (26 tests)
+# Run automated contract & UI tests (31 tests)
 npm test
 
 # Start Vite development server
@@ -95,16 +97,19 @@ Both test suites execute locally without requiring live external network calls o
 
 ### Backend Test Suite (Pytest)
 ```powershell
-Set-Location backend
-.venv\Scripts\python.exe -m pytest -v
+$env:PYTHONPATH="backend"
+backend\.venv\Scripts\python.exe -m pytest -v backend/tests
 ```
-- **Total Test Cases**: 99 tests passing.
+- **Total Test Cases**: 112 tests passing.
 - **Coverage**:
-  - Exact JSON Schema validation for `student_registration_v1` and `student_assistance_v1`.
+  - Exact JSON Schema validation for `student_registration_v1`, `student_assistance_v1`, and dynamic custom schemas.
   - Date normalization (ISO dates, named English months, impossible calendar date rejection like Feb 30, age boundaries 12–100).
   - Indian mobile number validation (10 ASCII digits, 6–9 starting digit, `+91` prefix handling).
   - Session lifecycle (in-memory storage, 3600-second TTL, atomic access, deletion, purge).
-  - Candidate mapping, grounded entity extraction, and manual override preservation.
+  - Voice correction and manual override protection (`source: "manual"` vs `source: "voice"`).
+  - Dynamic in-place locale switching (`PATCH /api/sessions/{sid}/locale`) preserving filled fields.
+  - Session lookup (`GET /api/sessions/{sid}`).
+  - Audio duration safety guard with 30-second cap (`413 AUDIO_TOO_LONG`).
   - Conversational turn processing and Sarvam Bulbul TTS base64 generation.
   - Revision-bound review verification and immutable local confirmation receipt creation.
 
@@ -113,13 +118,13 @@ Set-Location backend
 cd frontend
 npm test
 ```
-- **Total Test Cases**: 26 tests passing.
+- **Total Test Cases**: 31 tests passing.
 - **Coverage**:
-  - `schemaMapper` draft persistence and template switching without ID collision.
+  - `schemaMapper` draft persistence, custom JSON schema conversion, and template switching without ID collision.
   - Mobile number and calendar date offline validation rules.
   - Offline review and confirmation boundary states (stale review rejection, network fallback handling).
   - Schema alignment against `CONTRACT.md`.
-  - API client compliance (`PATCH` with `source: "manual"`, `ConfirmSession` with revision integer).
+  - API client compliance (`PATCH` with `source: "manual" | "voice"`, `ConfirmSession` with revision integer).
 
 ---
 
@@ -142,7 +147,7 @@ $sessionId = $created.session_id
 $sessionUrl = "$base/sessions/$sessionId"
 Write-Host "Created session: $sessionId"
 
-# 4. Patch form values manually
+# 4. Patch form values via voice provenance
 $values = @{
     full_name      = 'Pooja Das'
     date_of_birth  = '2005-08-15'
@@ -152,7 +157,7 @@ $values = @{
     programme      = 'BCA'
 }
 foreach ($key in $values.Keys) {
-    $body = @{field_id=$key; value=$values[$key]; source='manual'} | ConvertTo-Json
+    $body = @{field_id=$key; value=$values[$key]; source='voice'} | ConvertTo-Json
     Invoke-RestMethod "$sessionUrl/fields" -Method Patch -ContentType 'application/json' -Body $body | Out-Null
 }
 

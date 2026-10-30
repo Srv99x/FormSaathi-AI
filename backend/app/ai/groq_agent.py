@@ -127,9 +127,10 @@ def detect_guardrail_violation(transcript: str, language_code: str = "en-IN") ->
 class GroqAgent:
     """Agent using Groq (Llama 3.3) for entity extraction and conversational voice guidance."""
 
-    def __init__(self, api_key: str | None = None, model: str | None = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None, fallback_model: str | None = None):
         self.api_key = api_key or ai_config.GROQ_API_KEY
         self.model = model or ai_config.GROQ_MODEL
+        self.fallback_model = fallback_model or ai_config.GROQ_FALLBACK_MODEL
         self.base_url = ai_config.GROQ_BASE_URL.rstrip("/")
 
     @property
@@ -145,39 +146,70 @@ class GroqAgent:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "response_format": {"type": "json_object"} if json_mode else None,
-        }
 
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(timeout=ai_config.TIMEOUT_SECONDS) as client:
-                    response = await client.post(url, headers=headers, json=payload)
-            except httpx.TimeoutException:
-                if attempt == 2:
-                    raise APIError(504, "EXTRACTION_TIMEOUT", "AI extraction timed out. Please try again.", retryable=True)
-                await asyncio.sleep(1.0)
-                continue
-            except httpx.RequestError as exc:
-                if attempt == 2:
-                    raise APIError(502, "EXTRACTION_NETWORK_ERROR", f"Failed to contact AI provider: {str(exc)}", retryable=True)
-                await asyncio.sleep(1.0)
-                continue
+        # Dual-model fallback chain for high availability
+        models_to_try = [self.model]
+        if self.fallback_model and self.fallback_model not in models_to_try:
+            models_to_try.append(self.fallback_model)
 
-            if response.status_code == 429 and attempt < 2:
-                await asyncio.sleep(2.5)
-                continue
+        last_error = None
+        for current_model in models_to_try:
+            payload = {
+                "model": current_model,
+                "messages": messages,
+                "temperature": temperature,
+                "response_format": {"type": "json_object"} if json_mode else None,
+            }
 
-            if response.status_code in (401, 403):
-                raise APIError(503, "EXTRACTION_AUTH_ERROR", "AI provider authentication failed. Check GROQ_API_KEY.")
-            if response.status_code != 200:
-                raise APIError(502, "EXTRACTION_UPSTREAM_ERROR", f"AI provider returned error ({response.status_code}): {response.text}")
+            model_failed_permanently = False
+            for attempt in range(3):
+                try:
+                    async with httpx.AsyncClient(timeout=ai_config.TIMEOUT_SECONDS) as client:
+                        response = await client.post(url, headers=headers, json=payload)
+                except httpx.TimeoutException:
+                    if attempt == 2:
+                        last_error = APIError(504, "EXTRACTION_TIMEOUT", "AI extraction timed out. Please try again.", retryable=True)
+                    await asyncio.sleep(1.0)
+                    continue
+                except httpx.RequestError as exc:
+                    if attempt == 2:
+                        last_error = APIError(502, "EXTRACTION_NETWORK_ERROR", f"Failed to contact AI provider: {str(exc)}", retryable=True)
+                    await asyncio.sleep(1.0)
+                    continue
 
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+                if response.status_code == 429:
+                    if attempt < 2:
+                        await asyncio.sleep(2.5)
+                        continue
+                    last_error = APIError(429, "EXTRACTION_RATE_LIMIT", "AI extraction provider rate limited. Please try again in a moment.", retryable=True)
+                    break
+
+                if response.status_code in (401, 403):
+                    raise APIError(503, "EXTRACTION_AUTH_ERROR", "AI provider authentication failed. Check GROQ_API_KEY.")
+
+                if response.status_code == 400:
+                    resp_text = response.text.lower()
+                    if "model" in resp_text or "decommissioned" in resp_text or "deprecated" in resp_text:
+                        model_failed_permanently = True
+                        last_error = APIError(502, "EXTRACTION_UPSTREAM_ERROR", f"Model {current_model} unavailable: {response.text}")
+                        break
+
+                if response.status_code != 200:
+                    last_error = APIError(502, "EXTRACTION_UPSTREAM_ERROR", f"AI provider returned error ({response.status_code}): {response.text}")
+                    if attempt < 2:
+                        await asyncio.sleep(1.0)
+                        continue
+                    break
+
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+
+            if not model_failed_permanently and last_error and last_error.status != 502:
+                raise last_error
+
+        if last_error:
+            raise last_error
+        raise APIError(502, "EXTRACTION_UPSTREAM_ERROR", "All AI models in fallback chain failed.")
 
     async def extract_entities(self, transcript: str, language_code: str, form_schema: dict, current_values: dict | None = None) -> ExtractionResponse:
         """
